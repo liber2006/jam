@@ -7,15 +7,41 @@ import type { AgentVisualState } from '@/store/agentSlice';
 
 interface AgentAvatarContainerProps {
   agentId: string;
+  compact?: boolean;
 }
 
 export const AgentAvatarContainer: React.FC<AgentAvatarContainerProps> = ({
   agentId,
+  compact,
 }) => {
   const { profile, visualState } = useAgent(agentId);
   const { selectAgent } = useOrchestrator();
 
   if (!profile) return null;
+
+  if (compact) {
+    return (
+      <div
+        onClick={() => selectAgent(agentId)}
+        onKeyDown={(e) => e.key === 'Enter' && selectAgent(agentId)}
+        role="button"
+        tabIndex={0}
+        className="flex items-center gap-2 cursor-pointer w-full"
+      >
+        <AgentAvatar
+          visualState={visualState as AgentVisualState}
+          name={profile.name}
+          color={profile.color}
+          avatarUrl={profile.avatarUrl}
+          size="sm"
+        />
+        <div className="text-sm font-medium text-zinc-300 truncate">{profile.name}</div>
+        <div className="ml-auto">
+          <AgentStatusBadge state={visualState as AgentVisualState} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

@@ -53,6 +53,7 @@ export interface JamAPI {
       steps: Array<{ timestamp: number; type: string; summary: string }>;
       status: 'running' | 'completed' | 'failed';
     } | null>;
+    uploadAvatar: () => Promise<{ success: boolean; avatarUrl?: string; error?: string }>;
     onStatusChange: (
       callback: (data: { agentId: string; status: string }) => void,
     ) => () => void;
@@ -107,6 +108,7 @@ export interface JamAPI {
     ) => Promise<{ success: boolean; audioPath?: string; error?: string }>;
     getFilterSettings: () => Promise<{ vadThreshold: number; minRecordingMs: number }>;
     checkMicPermission: () => Promise<{ granted: boolean; status?: string }>;
+    testVoice: (voiceId: string) => Promise<{ success: boolean; audioData?: string; error?: string }>;
   };
 
   memory: {

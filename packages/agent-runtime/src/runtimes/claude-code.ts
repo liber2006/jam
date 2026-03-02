@@ -25,6 +25,7 @@ export class ClaudeCodeRuntime extends BaseAgentRuntime {
     nodeVersionRequired: 20,
     models: [
       { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', group: 'Claude 4' },
+      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', group: 'Claude 4' },
       { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', group: 'Claude 4' },
       { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', group: 'Claude 4' },
       { id: 'opus', label: 'Opus (latest)', group: 'Aliases' },

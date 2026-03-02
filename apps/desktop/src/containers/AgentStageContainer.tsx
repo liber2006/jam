@@ -8,6 +8,9 @@ export const AgentStageContainer: React.FC = () => {
   const activeAgentIds = useAppStore((s) => s.activeAgentIds);
   const selectedAgentId = useAppStore((s) => s.selectedAgentId);
 
+  // Use compact layout when many agents are shown
+  const isCompact = activeAgentIds.length > 2;
+
   const gridClass =
     activeAgentIds.length === 1
       ? 'grid-cols-1'
@@ -36,33 +39,35 @@ export const AgentStageContainer: React.FC = () => {
   }
 
   return (
-    <div className={`flex-1 grid ${gridClass} gap-3 p-3 overflow-auto`}>
-      <AnimatePresence mode="popLayout">
-        {activeAgentIds.map((agentId) => (
-          <motion.div
-            key={agentId}
-            layout
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-            className={`
-              flex flex-col rounded-xl border bg-zinc-900/60 overflow-hidden
-              ${selectedAgentId === agentId ? 'border-blue-500/40' : 'border-zinc-800'}
-            `}
-          >
-            {/* Avatar header */}
-            <div className="flex items-center justify-center p-3 border-b border-zinc-800/50">
-              <AgentAvatarContainer agentId={agentId} />
-            </div>
+    <div className="flex-1 overflow-auto p-3">
+      <div className={`grid ${gridClass} gap-3 auto-rows-[minmax(280px,1fr)]`}>
+        <AnimatePresence mode="popLayout">
+          {activeAgentIds.map((agentId) => (
+            <motion.div
+              key={agentId}
+              layout
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className={`
+                flex flex-col rounded-xl border bg-zinc-900/60 overflow-hidden
+                ${selectedAgentId === agentId ? 'border-blue-500/40' : 'border-zinc-800'}
+              `}
+            >
+              {/* Avatar header — compact when many agents */}
+              <div className={`flex items-center ${isCompact ? 'px-3 py-2' : 'justify-center p-3'} border-b border-zinc-800/50`}>
+                <AgentAvatarContainer agentId={agentId} compact={isCompact} />
+              </div>
 
-            {/* Per-agent chat */}
-            <div className="flex-1 min-h-[200px]">
-              <AgentChatContainer agentId={agentId} />
-            </div>
-          </motion.div>
-        ))}
-      </AnimatePresence>
+              {/* Per-agent chat */}
+              <div className="flex-1 min-h-0">
+                <AgentChatContainer agentId={agentId} />
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   );
 };

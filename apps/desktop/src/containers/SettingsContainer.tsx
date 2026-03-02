@@ -132,6 +132,7 @@ export const SettingsContainer: React.FC<{
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [runtimeOptions, setRuntimeOptions] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [testingVoice, setTestingVoice] = useState(false);
 
   useEffect(() => {
     window.jam.config.get().then((c) => {
@@ -176,6 +177,19 @@ export const SettingsContainer: React.FC<{
       ttsProvider: provider,
       ttsVoice: voices[0]?.id ?? '',
     });
+  };
+
+  const handleTestVoice = async () => {
+    setTestingVoice(true);
+    try {
+      const voiceId = config.ttsVoice || TTS_VOICES[config.ttsProvider][0]?.id || 'alloy';
+      const result = await window.jam.voice.testVoice(voiceId);
+      if (result.success && result.audioData) {
+        const audio = new Audio(result.audioData);
+        audio.play();
+      }
+    } catch { /* ignore */ }
+    finally { setTestingVoice(false); }
   };
 
   const handleSave = async () => {
@@ -290,12 +304,25 @@ export const SettingsContainer: React.FC<{
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Default Voice</label>
-              <ComboSelect
-                value={config.ttsVoice}
-                options={TTS_VOICES[config.ttsProvider]}
-                onChange={(val) => setConfig({ ...config, ttsVoice: val })}
-                placeholder="Custom voice ID"
-              />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <ComboSelect
+                    value={config.ttsVoice}
+                    options={TTS_VOICES[config.ttsProvider]}
+                    onChange={(val) => setConfig({ ...config, ttsVoice: val })}
+                    placeholder="Custom voice ID"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestVoice}
+                  disabled={testingVoice}
+                  className="px-3 py-2 bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 rounded-lg text-sm text-zinc-300 disabled:opacity-50 transition-colors self-start"
+                  title="Preview voice"
+                >
+                  {testingVoice ? '...' : '\u25B6'}
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">

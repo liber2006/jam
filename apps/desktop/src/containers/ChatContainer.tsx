@@ -14,6 +14,16 @@ export const ChatContainer: React.FC = () => {
   const threadAgentId = useAppStore((s) => s.threadAgentId);
   const setThreadAgent = useAppStore((s) => s.setThreadAgent);
   const deleteMessage = useAppStore((s) => s.deleteMessage);
+  const agentsMap = useAppStore((s) => s.agents);
+
+  // Build agentId → avatarUrl lookup for chat message avatars
+  const agentAvatars = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const [id, agent] of Object.entries(agentsMap)) {
+      if (agent.profile.avatarUrl) map[id] = agent.profile.avatarUrl;
+    }
+    return map;
+  }, [agentsMap]);
   const loadingRef = useRef(false);
 
   // Derive ordered array — only recomputes when IDs or map changes
@@ -80,6 +90,7 @@ export const ChatContainer: React.FC = () => {
       onViewOutput={handleViewOutput}
       onDeleteMessage={deleteMessage}
       threadAgentId={threadAgentId}
+      agentAvatars={agentAvatars}
     />
   );
 };

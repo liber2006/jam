@@ -1,4 +1,5 @@
 import { ipcMain, systemPreferences, type BrowserWindow } from 'electron';
+import { readFile } from 'node:fs/promises';
 import { createLogger } from '@jam/core';
 import type { AgentManager } from '@jam/agent-runtime';
 import type { VoiceService } from '@jam/voice';
@@ -221,6 +222,29 @@ export function registerVoiceHandlers(
         const speed = agent.profile.voice.speed ?? config.ttsSpeed ?? 1.0;
         const audioPath = await voiceService.synthesize(text, voiceId, agentId, { speed });
         return { success: true, audioPath };
+      } catch (error) {
+        return { success: false, error: String(error) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'voice:testVoice',
+    async (_, voiceId: string) => {
+      const voiceService = getVoiceService();
+      if (!voiceService) {
+        return { success: false, error: 'Voice service not initialized' };
+      }
+
+      try {
+        const text = 'Hello! This is what I sound like.';
+        const speed = config.ttsSpeed ?? 1.0;
+        const audioPath = await voiceService.synthesize(text, voiceId, 'preview', { speed });
+        const audioBuffer = await readFile(audioPath);
+        return {
+          success: true,
+          audioData: `data:audio/mpeg;base64,${audioBuffer.toString('base64')}`,
+        };
       } catch (error) {
         return { success: false, error: String(error) };
       }

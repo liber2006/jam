@@ -5,6 +5,8 @@ import {
   Tray,
   Menu,
   nativeImage,
+  net,
+  protocol,
   systemPreferences,
 } from 'electron';
 import path from 'node:path';
@@ -272,6 +274,14 @@ function registerIpcHandlers(): void {
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 app.whenReady().then(() => {
+  // Custom protocol to serve local files (avatars, etc.) from the renderer.
+  // Sandboxed renderers can't load file:// URLs, so we use jam-local:// instead.
+  protocol.handle('jam-local', (request) => {
+    // URL format: jam-local:///absolute/path/to/file
+    const filePath = decodeURIComponent(new URL(request.url).pathname);
+    return net.fetch(`file://${filePath}`);
+  });
+
   orchestrator = new Orchestrator();
 
   createWindow();

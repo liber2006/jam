@@ -19,6 +19,7 @@ export const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   const agentMessageIds = useAppStore((s) => s.messageIdsByAgent[agentId]);
   const messagesById = useAppStore((s) => s.messagesById);
   const deleteMessage = useAppStore((s) => s.deleteMessage);
+  const agentAvatarUrl = useAppStore((s) => s.agents[agentId]?.profile.avatarUrl);
 
   // Derive ordered messages — only recomputes when this agent's IDs or the map changes
   const agentMessages = useMemo(() => {
@@ -91,10 +92,10 @@ export const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
   const itemContent = useCallback(
     (_index: number, msg: ChatMessage) => (
       <div className="px-3 overflow-hidden">
-        <ChatMessageView key={msg.id} message={msg} onDelete={deleteMessage} />
+        <ChatMessageView key={msg.id} message={msg} agentAvatarUrl={agentAvatarUrl} onDelete={deleteMessage} />
       </div>
     ),
-    [deleteMessage],
+    [deleteMessage, agentAvatarUrl],
   );
 
   // Stable components object

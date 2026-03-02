@@ -22,6 +22,7 @@ export class OpenCodeRuntime extends BaseAgentRuntime {
     installHint: 'curl -fsSL https://opencode.ai/install | bash',
     models: [
       { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', group: 'Anthropic' },
+      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', group: 'Anthropic' },
       { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', group: 'Anthropic' },
       { id: 'gpt-4o', label: 'GPT-4o', group: 'OpenAI' },
       { id: 'gpt-4o-mini', label: 'GPT-4o Mini', group: 'OpenAI' },

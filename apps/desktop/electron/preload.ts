@@ -446,6 +446,7 @@ contextBridge.exposeInMainWorld('jam', {
     restart: (agentId) => ipcRenderer.invoke('agents:restart', agentId),
     stopAll: () => ipcRenderer.invoke('agents:stopAll'),
     getTaskStatus: (agentId) => ipcRenderer.invoke('agents:getTaskStatus', agentId),
+    uploadAvatar: () => ipcRenderer.invoke('agents:uploadAvatar'),
     onStatusChange: (cb) =>
       createEventListener('agents:statusChange', cb),
     onCreated: (cb) => createEventListener('agents:created', cb),
@@ -483,6 +484,8 @@ contextBridge.exposeInMainWorld('jam', {
       ipcRenderer.invoke('voice:getFilterSettings'),
     checkMicPermission: () =>
       ipcRenderer.invoke('voice:checkMicPermission'),
+    testVoice: (voiceId: string) =>
+      ipcRenderer.invoke('voice:testVoice', voiceId),
   },
 
   memory: {

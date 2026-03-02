@@ -6,6 +6,8 @@ import { formatTime } from '@/utils/format';
 
 interface ChatMessageProps {
   message: ChatMessage;
+  /** Agent avatar image URL — looked up from agent profile by the container */
+  agentAvatarUrl?: string;
   /** Called when user clicks "View output" — opens the thread drawer for this agent */
   onViewOutput?: (agentId: string) => void;
   /** Whether this agent's thread drawer is currently open */
@@ -36,7 +38,7 @@ const DeleteButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
   </button>
 );
 
-export const ChatMessageView: React.FC<ChatMessageProps> = React.memo(({ message, onViewOutput, isThreadOpen, onDelete }) => {
+export const ChatMessageView: React.FC<ChatMessageProps> = React.memo(({ message, agentAvatarUrl, onViewOutput, isThreadOpen, onDelete }) => {
   const [expanded, setExpanded] = useState(false);
   const handleDelete = onDelete ? () => onDelete(message.id) : undefined;
 
@@ -139,15 +141,23 @@ export const ChatMessageView: React.FC<ChatMessageProps> = React.memo(({ message
   return (
     <div className="group flex mb-4 gap-3">
       {/* Agent avatar */}
-      <div
-        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-1"
-        style={{
-          backgroundColor: `${message.agentColor ?? '#6b7280'}25`,
-          color: message.agentColor ?? '#6b7280',
-        }}
-      >
-        {(message.agentName || '?').charAt(0).toUpperCase()}
-      </div>
+      {agentAvatarUrl ? (
+        <img
+          src={agentAvatarUrl.startsWith('/') ? `jam-local://${agentAvatarUrl}` : agentAvatarUrl}
+          alt={message.agentName || 'Agent'}
+          className="w-8 h-8 rounded-full object-cover shrink-0 mt-1"
+        />
+      ) : (
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-1"
+          style={{
+            backgroundColor: `${message.agentColor ?? '#6b7280'}25`,
+            color: message.agentColor ?? '#6b7280',
+          }}
+        >
+          {(message.agentName || '?').charAt(0).toUpperCase()}
+        </div>
+      )}
 
       <div className="flex-1 min-w-0">
         {/* Agent header */}

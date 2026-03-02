@@ -6,6 +6,7 @@ interface AgentCardProps {
   name: string;
   runtime: string;
   color: string;
+  avatarUrl?: string;
   visualState: AgentVisualState;
   isSelected: boolean;
   onClick: () => void;
@@ -20,6 +21,7 @@ export const AgentCard: React.FC<AgentCardProps> = React.memo(({
   name,
   runtime,
   color,
+  avatarUrl,
   visualState,
   isSelected,
   onClick,
@@ -40,13 +42,21 @@ export const AgentCard: React.FC<AgentCardProps> = React.memo(({
         ${isSelected ? 'bg-zinc-800 border border-zinc-600' : 'hover:bg-zinc-800/50 border border-transparent'}
       `}
     >
-      {/* Color dot */}
-      <div
-        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-        style={{ backgroundColor: `${color}30`, color }}
-      >
-        {name.charAt(0).toUpperCase()}
-      </div>
+      {/* Avatar */}
+      {avatarUrl ? (
+        <img
+          src={avatarUrl.startsWith('/') ? `jam-local://${avatarUrl}` : avatarUrl}
+          alt={name}
+          className="w-8 h-8 rounded-full object-cover shrink-0"
+        />
+      ) : (
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+          style={{ backgroundColor: `${color}30`, color }}
+        >
+          {name.charAt(0).toUpperCase()}
+        </div>
+      )}
 
       {/* Info */}
       <div className="flex-1 min-w-0">

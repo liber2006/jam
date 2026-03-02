@@ -56,10 +56,14 @@ export class PortAllocator implements IPortAllocator {
     // Find the lowest container port and its host port
     let minContainer = Infinity;
     let minHost = Infinity;
+    let maxHost = -Infinity;
     for (const [containerPort, hostPort] of actualMappings) {
       if (containerPort < minContainer) {
         minContainer = containerPort;
         minHost = hostPort;
+      }
+      if (hostPort > maxHost) {
+        maxHost = hostPort;
       }
     }
 
@@ -70,10 +74,13 @@ export class PortAllocator implements IPortAllocator {
     };
 
     this.allocations.set(agentId, allocation);
-    // Advance nextSlot past any reclaimed range to avoid overlap
-    const reclaimedEnd = Math.ceil((minHost - this.basePort + actualMappings.size) / this.portsPerAgent);
-    if (reclaimedEnd > this.nextSlot) {
-      this.nextSlot = reclaimedEnd;
+
+    // Advance nextSlot past the highest occupied host port to avoid overlap.
+    // Uses the highest host port + 1 (relative to basePort) divided by portsPerAgent,
+    // so the next slot starts cleanly after all reclaimed ranges.
+    const slotsNeeded = Math.ceil((maxHost + 1 - this.basePort) / this.portsPerAgent);
+    if (slotsNeeded > this.nextSlot) {
+      this.nextSlot = slotsNeeded;
     }
 
     log.info(

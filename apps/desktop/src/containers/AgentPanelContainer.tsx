@@ -56,6 +56,7 @@ export const AgentPanelContainer: React.FC = () => {
         model: editingAgent.profile.model,
         systemPrompt: editingAgent.profile.systemPrompt,
         color: editingAgent.profile.color,
+        avatarUrl: editingAgent.profile.avatarUrl,
         voice: editingAgent.profile.voice,
         cwd: editingAgent.profile.cwd,
         autoStart: editingAgent.profile.autoStart,
@@ -83,6 +84,7 @@ export const AgentPanelContainer: React.FC = () => {
                 name={agent.profile.name}
                 runtime={agent.profile.runtime}
                 color={agent.profile.color}
+                avatarUrl={agent.profile.avatarUrl}
                 visualState={agent.visualState as AgentVisualState}
                 isSelected={agent.profile.id === selectedAgentId}
                 isRunning={agent.status === 'running' || agent.status === 'starting'}

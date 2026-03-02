@@ -1,4 +1,8 @@
-import { ipcMain } from 'electron';
+import { ipcMain, dialog, BrowserWindow } from 'electron';
+import { copyFile, mkdir } from 'node:fs/promises';
+import { join, extname } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import type { AgentManager, RuntimeRegistry } from '@jam/agent-runtime';
 
 /** Narrow dependency interface — only what agent handlers need */
@@ -74,5 +78,31 @@ export function registerAgentHandlers(deps: AgentHandlerDeps): void {
 
   ipcMain.handle('agents:getTaskStatus', (_, agentId: string) => {
     return agentManager.getTaskStatus(agentId);
+  });
+
+  ipcMain.handle('agents:uploadAvatar', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return { success: false, error: 'No window' };
+
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Select Avatar Image',
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
+      properties: ['openFile'],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'cancelled' };
+    }
+
+    const srcPath = result.filePaths[0];
+    const ext = extname(srcPath).toLowerCase() || '.png';
+    const avatarsDir = join(homedir(), '.jam', 'avatars');
+    await mkdir(avatarsDir, { recursive: true });
+
+    const destName = `${randomUUID()}${ext}`;
+    const destPath = join(avatarsDir, destName);
+    await copyFile(srcPath, destPath);
+
+    return { success: true, avatarUrl: destPath };
   });
 }

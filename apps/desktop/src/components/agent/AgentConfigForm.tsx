@@ -25,6 +25,7 @@ export interface AgentFormValues {
   model?: string;
   systemPrompt?: string;
   color: string;
+  avatarUrl?: string;
   voice: { ttsVoiceId: string };
   cwd?: string;
   autoStart?: boolean;
@@ -56,6 +57,7 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
   const [model, setModel] = useState(initialValues?.model ?? '');
   const [systemPrompt, setSystemPrompt] = useState(initialValues?.systemPrompt ?? '');
   const [color, setColor] = useState(initialValues?.color ?? AGENT_COLORS[0]);
+  const [avatarUrl, setAvatarUrl] = useState(initialValues?.avatarUrl ?? '');
   const [ttsVoiceId, setTtsVoiceId] = useState(initialValues?.voice?.ttsVoiceId ?? '');
   const [ttsProvider, setTtsProvider] = useState<TTSProvider>('openai');
   const [cwd, setCwd] = useState(initialValues?.cwd ?? '');
@@ -64,6 +66,7 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
   const [allowInterrupts, setAllowInterrupts] = useState(initialValues?.allowInterrupts ?? false);
   const [secretBindings, setSecretBindings] = useState<SecretBinding[]>(initialValues?.secretBindings ?? []);
   const [availableSecrets, setAvailableSecrets] = useState<SecretInfo[]>([]);
+  const [testingVoice, setTestingVoice] = useState(false);
 
   // Load available secrets from vault
   useEffect(() => {
@@ -115,6 +118,7 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
       model: model || undefined,
       systemPrompt: systemPrompt || undefined,
       color,
+      avatarUrl: avatarUrl || undefined,
       voice: { ttsVoiceId: voiceId },
       cwd: cwd || undefined,
       autoStart,
@@ -122,6 +126,19 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
       allowInterrupts,
       secretBindings: validBindings.length > 0 ? validBindings : undefined,
     });
+  };
+
+  const handleTestVoice = async () => {
+    setTestingVoice(true);
+    try {
+      const voiceId = ttsVoiceId || voices[0]?.id || 'alloy';
+      const result = await window.jam.voice.testVoice(voiceId);
+      if (result.success && result.audioData) {
+        const audio = new Audio(result.audioData);
+        audio.play();
+      }
+    } catch { /* ignore */ }
+    finally { setTestingVoice(false); }
   };
 
   return (
@@ -211,34 +228,81 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
 
       <div>
         <label className="block text-xs text-zinc-400 mb-1">Voice</label>
-        <select
-          value={ttsVoiceId}
-          onChange={(e) => setTtsVoiceId(e.target.value)}
-          className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
-        >
-          {voices.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={ttsVoiceId}
+            onChange={(e) => setTtsVoiceId(e.target.value)}
+            className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+          >
+            {voices.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleTestVoice}
+            disabled={testingVoice}
+            className="px-3 py-2 bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 rounded-lg text-sm text-zinc-300 disabled:opacity-50 transition-colors"
+            title="Preview voice"
+          >
+            {testingVoice ? '...' : '\u25B6'}
+          </button>
+        </div>
       </div>
 
       <div>
         <label className="block text-xs text-zinc-400 mb-1">Color</label>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {AGENT_COLORS.map((c) => (
             <button
               key={c}
               type="button"
               onClick={() => setColor(c)}
-              className={`w-7 h-7 rounded-full transition-transform ${
+              className={`w-6 h-6 rounded-full transition-transform ${
                 color === c ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-zinc-900' : ''
               }`}
               style={{ backgroundColor: c }}
             />
           ))}
         </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-400 mb-1">Avatar Image</label>
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={avatarUrl}
+            onChange={(e) => setAvatarUrl(e.target.value)}
+            placeholder="URL or upload a file"
+            className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+          />
+          <button
+            type="button"
+            onClick={async () => {
+              const result = await window.jam.agents.uploadAvatar();
+              if (result.success && result.avatarUrl) {
+                setAvatarUrl(result.avatarUrl);
+              }
+            }}
+            className="px-3 py-2 bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 rounded-lg text-xs text-zinc-300 transition-colors whitespace-nowrap"
+          >
+            Upload
+          </button>
+          {avatarUrl && (
+            <img
+              src={avatarUrl.startsWith('/') ? `jam-local://${avatarUrl}` : avatarUrl}
+              alt="Preview"
+              className="w-8 h-8 rounded-full object-cover border border-zinc-600 shrink-0"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+          )}
+        </div>
+        <p className="text-[10px] text-zinc-600 mt-1">
+          Optional. Paste a URL or upload a file. Shows a colored initial if left empty.
+        </p>
       </div>
 
       <div className="space-y-2">

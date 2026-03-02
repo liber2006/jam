@@ -41,7 +41,7 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = React.memo(({
       {/* Avatar */}
       {avatarUrl ? (
         <img
-          src={avatarUrl}
+          src={avatarUrl.startsWith('/') ? `jam-local://${avatarUrl}` : avatarUrl}
           alt={name}
           className="rounded-full object-cover"
           style={{ width: px - 8, height: px - 8 }}

@@ -11,6 +11,8 @@ interface ChatViewProps {
   onViewOutput?: (agentId: string) => void;
   onDeleteMessage?: (id: string) => void;
   threadAgentId?: string | null;
+  /** Map of agentId → avatarUrl for rendering agent avatars */
+  agentAvatars?: Record<string, string>;
 }
 
 const VirtuosoFooter = () => <div className="h-4" />;
@@ -23,6 +25,7 @@ export const ChatView: React.FC<ChatViewProps> = React.memo(({
   onViewOutput,
   onDeleteMessage,
   threadAgentId,
+  agentAvatars,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -51,13 +54,14 @@ export const ChatView: React.FC<ChatViewProps> = React.memo(({
         <ChatMessageView
           key={msg.id}
           message={msg}
+          agentAvatarUrl={msg.agentId ? agentAvatars?.[msg.agentId] : undefined}
           onViewOutput={onViewOutput}
           isThreadOpen={!!msg.agentId && msg.agentId === threadAgentId}
           onDelete={onDeleteMessage}
         />
       </div>
     ),
-    [onViewOutput, onDeleteMessage, threadAgentId],
+    [onViewOutput, onDeleteMessage, threadAgentId, agentAvatars],
   );
 
   // Stable components object — prevents Virtuoso from remounting internals

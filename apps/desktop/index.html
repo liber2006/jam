@@ -8,8 +8,8 @@
         script-src 'self' blob: 'wasm-unsafe-eval';
         worker-src 'self' blob:;
         style-src 'self' 'unsafe-inline';
-        img-src 'self' data: blob:;
-        media-src 'self' file: blob: data:;
+        img-src 'self' data: blob: file: jam-local:;
+        media-src 'self' file: blob: data: jam-local:;
         connect-src 'self' https://* wss://*;
         font-src 'self' data:;">
     <link rel="icon" type="image/png" href="/src/assets/jam-logo.png" />
