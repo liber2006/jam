@@ -128,8 +128,8 @@ export class InboxWatcher {
             text: `Delegated task to ${agentId}: "${title}"`,
             success: true,
           });
-        } catch {
-          // skip malformed lines
+        } catch (err) {
+          log.debug(`Skipping malformed inbox line: ${String(err)}`);
         }
       }
 
@@ -138,11 +138,14 @@ export class InboxWatcher {
         this.processing.add(inboxPath);
         await writeFile(inboxPath, '', 'utf-8');
         this.offsets.set(inboxPath, 0);
-        // Release guard after fs events settle
-        setTimeout(() => this.processing.delete(inboxPath), 200);
+        // Release guard after fs-watcher events from our write settle.
+        // Two macrotask ticks via setImmediate is enough for the watcher to fire and be ignored.
+        setImmediate(() => {
+          setImmediate(() => this.processing.delete(inboxPath));
+        });
       }
-    } catch {
-      // inbox file may not exist yet
+    } catch (err) {
+      log.debug(`Inbox not yet available for ${agentId}: ${String(err)}`);
     }
   }
 }

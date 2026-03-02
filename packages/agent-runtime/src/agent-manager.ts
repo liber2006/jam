@@ -12,7 +12,7 @@ import type {
   ExecutionOptions,
   IStatsStore,
 } from '@jam/core';
-import { createLogger } from '@jam/core';
+import { createLogger, IntervalTimer } from '@jam/core';
 import type { IPtyManager } from './pty-manager.js';
 import { RuntimeRegistry } from './runtime-registry.js';
 import { AgentContextBuilder } from './agent-context-builder.js';
@@ -74,7 +74,7 @@ export type SecretValuesProvider = () => string[];
 
 export class AgentManager {
   private agents = new Map<AgentId, AgentState>();
-  private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly healthCheckTimer = new IntervalTimer();
   /** Session IDs per agent for voice command conversation continuity */
   private voiceSessions = new Map<AgentId, string>();
   /** AbortControllers per agent — allows interrupting running tasks */
@@ -293,7 +293,7 @@ export class AgentManager {
   ): Promise<{ success: boolean; error?: string }> {
     this.updateStatus(agentId, 'restarting');
     this.stop(agentId);
-    await new Promise((r) => setTimeout(r, 500));
+    await this.ptyManager.waitForExit(agentId);
     const result = await this.start(agentId);
     if (!result.success) {
       this.updateStatus(agentId, 'stopped');
@@ -788,7 +788,7 @@ export class AgentManager {
   }
 
   startHealthCheck(intervalMs = 10_000): void {
-    this.healthCheckInterval = setInterval(() => {
+    this.healthCheckTimer.cancelAndSet(() => {
       for (const [agentId, state] of this.agents) {
         if (state.status === 'running' && !this.ptyManager.isRunning(agentId)) {
           log.error(`Agent "${state.profile.name}" PTY died unexpectedly`, undefined, agentId);
@@ -800,10 +800,7 @@ export class AgentManager {
   }
 
   stopHealthCheck(): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
+    this.healthCheckTimer.dispose();
   }
 
   private updateStatus(agentId: AgentId, status: AgentStatus): void {

@@ -1,5 +1,5 @@
 import type { Task, ITaskStore, IEventBus } from '@jam/core';
-import { Events, createLogger, JAM_SYSTEM_AGENT_ID } from '@jam/core';
+import { Events, createLogger, JAM_SYSTEM_AGENT_ID, IntervalTimer } from '@jam/core';
 import { nextCronRun } from './cron-parser.js';
 import type { FileScheduleStore, PersistedSchedule } from './stores/file-schedule-store.js';
 
@@ -72,7 +72,7 @@ const SYSTEM_SCHEDULES: Array<{
 ];
 
 export class TaskScheduler {
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly timer = new IntervalTimer();
   /** In-memory fallback for backwards compatibility (used when no store provided) */
   private readonly memorySchedules: Map<string, ScheduledTask> = new Map();
   /** Handlers for system schedules — matched by task tag, called instead of creating a generic task */
@@ -113,22 +113,17 @@ export class TaskScheduler {
   }
 
   async start(): Promise<void> {
-    if (this.timer) return;
-
     // Sync system schedules: seed missing, remove stale
     if (this.scheduleStore) {
       await this.syncSystemSchedules();
     }
 
-    this.timer = setInterval(() => this.tick(), this.checkIntervalMs);
+    this.timer.cancelAndSet(() => this.tick(), this.checkIntervalMs);
     this.tick();
   }
 
   stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.timer.dispose();
   }
 
   async getSchedules(): Promise<ScheduledTask[]> {

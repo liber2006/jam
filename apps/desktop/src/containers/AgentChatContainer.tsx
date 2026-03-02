@@ -72,7 +72,7 @@ export const AgentChatContainer: React.FC<AgentChatContainerProps> = ({
 
       setHasMore(result.hasMore);
     } catch (err) {
-      console.error('Failed to load agent history:', err);
+      console.error('[AgentChat] Failed to load agent history:', err);
     } finally {
       setIsLoading(false);
       loadingRef.current = false;

@@ -1,33 +1,39 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import type { IDisposable } from '@jam/core';
+import { RunOnceScheduler } from '@jam/core';
 
 /**
  * Debounced file writer — coalesces rapid writes into a single disk flush.
  * Used by all file-backed stores to avoid I/O thrashing.
  *
- * Uses trailing-edge debounce: each call resets the timer so that the flush
- * only fires once writes have settled for `delayMs`.
+ * Uses RunOnceScheduler (trailing-edge debounce): each call reschedules
+ * the timer so that the flush only fires once writes have settled for `delayMs`.
+ *
+ * Implements IDisposable for proper lifecycle management.
  */
-export class DebouncedFileWriter {
-  private timer: ReturnType<typeof setTimeout> | null = null;
+export class DebouncedFileWriter implements IDisposable {
+  private pendingFlush: (() => Promise<void>) | null = null;
+  private readonly scheduler: RunOnceScheduler;
 
-  constructor(private readonly delayMs: number = 500) {}
+  constructor(delayMs: number = 500) {
+    this.scheduler = new RunOnceScheduler(() => {
+      const flush = this.pendingFlush;
+      this.pendingFlush = null;
+      flush?.().catch(() => {});
+    }, delayMs);
+  }
 
   /** Schedule a flush. Resets the timer on each call (trailing-edge debounce). */
   schedule(flush: () => Promise<void>): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      flush().catch(() => {});
-    }, this.delayMs);
+    this.pendingFlush = flush;
+    this.scheduler.schedule();
   }
 
   /** Cancel any pending flush (e.g. on shutdown). */
   cancel(): void {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.scheduler.cancel();
+    this.pendingFlush = null;
   }
 
   /** Force an immediate flush, cancelling any pending timer. */
@@ -37,7 +43,12 @@ export class DebouncedFileWriter {
   }
 
   get pending(): boolean {
-    return this.timer !== null;
+    return this.scheduler.isScheduled;
+  }
+
+  dispose(): void {
+    this.scheduler.dispose();
+    this.pendingFlush = null;
   }
 }
 

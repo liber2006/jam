@@ -2,7 +2,7 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFile, spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { createLogger } from '@jam/core';
+import { createLogger, IntervalTimer } from '@jam/core';
 import treeKill from 'tree-kill';
 
 const log = createLogger('ServiceRegistry');
@@ -57,7 +57,7 @@ export class ServiceRegistry {
   /** Consecutive health check failures per service (key: "agentId:name") */
   private failureCounts = new Map<string, number>();
   /** Health monitor interval handle */
-  private healthInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly healthTimer = new IntervalTimer();
   /** Port resolver for sandbox mode (maps container port → host port) */
   private portResolver: PortResolver = (_agentId, port) => port;
   /** Container operations for sandbox mode (stop/restart inside Docker) */
@@ -350,9 +350,8 @@ export class ServiceRegistry {
    *  Checks all cached services on an interval, using consecutive failure
    *  thresholds to avoid flicker from transient check failures. */
   startHealthMonitor(): void {
-    if (this.healthInterval) return;
     log.info(`Health monitor started (interval=${HEALTH_CHECK_INTERVAL_MS}ms, threshold=${FAILURE_THRESHOLD})`);
-    this.healthInterval = setInterval(() => {
+    this.healthTimer.cancelAndSet(() => {
       this.runHealthChecks().catch((err) =>
         log.warn(`Health check error: ${String(err)}`),
       );
@@ -361,11 +360,8 @@ export class ServiceRegistry {
 
   /** Stop the background health monitor */
   stopHealthMonitor(): void {
-    if (this.healthInterval) {
-      clearInterval(this.healthInterval);
-      this.healthInterval = null;
-      log.info('Health monitor stopped');
-    }
+    this.healthTimer.dispose();
+    log.info('Health monitor stopped');
   }
 
   /** Run a single health check cycle across all cached services */

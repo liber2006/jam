@@ -1,5 +1,5 @@
 import type { AgentId } from '@jam/core';
-import { createLogger } from '@jam/core';
+import { createLogger, TimeoutTimer } from '@jam/core';
 import type * as pty from 'node-pty';
 import treeKill from 'tree-kill';
 import { buildCleanEnv } from './utils.js';
@@ -42,6 +42,8 @@ export interface IPtyManager {
   write(agentId: AgentId, data: string): void;
   resize(agentId: AgentId, cols: number, rows: number): void;
   kill(agentId: AgentId): void;
+  /** Wait for a PTY process to exit. Resolves immediately if not running. */
+  waitForExit(agentId: AgentId, timeoutMs?: number): Promise<void>;
   getScrollback(agentId: AgentId): string;
   isRunning(agentId: AgentId): boolean;
   killAll(): void;
@@ -59,6 +61,8 @@ export class PtyManager implements IPtyManager {
   private instances = new Map<string, PtyInstance>();
   private outputHandler: PtyOutputHandler | null = null;
   private exitHandler: PtyExitHandler | null = null;
+  /** Pending waitForExit() callers — resolved when the PTY exits */
+  private exitWaiters = new Map<string, Array<() => void>>();
   onOutput(handler: PtyOutputHandler): void {
     this.outputHandler = handler;
   }
@@ -123,6 +127,12 @@ export class PtyManager implements IPtyManager {
         const lastOutput = dataHandler.getLastOutput();
         this.instances.delete(agentId);
         this.exitHandler?.(agentId, exitCode, lastOutput);
+        // Resolve any pending waitForExit() callers
+        const waiters = this.exitWaiters.get(agentId);
+        if (waiters) {
+          this.exitWaiters.delete(agentId);
+          for (const resolve of waiters) resolve();
+        }
       });
 
       this.instances.set(agentId, instance);
@@ -159,7 +169,9 @@ export class PtyManager implements IPtyManager {
         if (err) log.warn(`tree-kill SIGTERM failed for PID ${pid}: ${err.message}`, undefined, agentId);
       });
       // Escalate to SIGKILL if the process ignores SIGTERM (e.g. deep in an operation)
-      setTimeout(() => {
+      const killTimer = new TimeoutTimer();
+      killTimer.cancelAndSet(() => {
+        killTimer.dispose();
         try {
           process.kill(pid, 0); // Check if still alive (throws if dead)
           log.warn(`PID ${pid} ignored SIGTERM — escalating to SIGKILL`, undefined, agentId);
@@ -169,6 +181,29 @@ export class PtyManager implements IPtyManager {
         }
       }, 3000);
     }
+  }
+
+  async waitForExit(agentId: AgentId, timeoutMs = 5000): Promise<void> {
+    if (!this.instances.has(agentId)) return; // Already dead
+    return new Promise<void>((resolve) => {
+      const waiters = this.exitWaiters.get(agentId) ?? [];
+      this.exitWaiters.set(agentId, waiters);
+      const timer = new TimeoutTimer();
+      const done = () => {
+        timer.dispose();
+        resolve();
+      };
+      timer.cancelAndSet(() => {
+        // Timeout — remove this waiter and resolve anyway
+        const arr = this.exitWaiters.get(agentId);
+        if (arr) {
+          const idx = arr.indexOf(done);
+          if (idx >= 0) arr.splice(idx, 1);
+        }
+        resolve();
+      }, timeoutMs);
+      waiters.push(done);
+    });
   }
 
   getScrollback(agentId: AgentId): string {

@@ -1,5 +1,3 @@
-import type { AgentProfile } from '../models/agent.js';
-
 /** Container info returned by container manager operations */
 export interface ContainerInfo {
   containerId: string;

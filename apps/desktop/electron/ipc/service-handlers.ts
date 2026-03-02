@@ -1,5 +1,8 @@
 import { ipcMain, shell } from 'electron';
+import { createLogger } from '@jam/core';
 import type { ServiceRegistry } from '@jam/agent-runtime';
+
+const log = createLogger('ServiceHandlers');
 
 /** Narrow dependency interface — only what service handlers need */
 export interface ServiceHandlerDeps {
@@ -37,7 +40,8 @@ export function registerServiceHandlers(deps: ServiceHandlerDeps): void {
     try {
       shell.openExternal(`http://localhost:${port}`);
       return { success: true };
-    } catch {
+    } catch (err) {
+      log.warn(`Failed to open http://localhost:${port}: ${String(err)}`);
       return { success: false };
     }
   });

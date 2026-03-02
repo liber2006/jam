@@ -29,8 +29,9 @@ export const ServicePanel: React.FC = () => {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 10_000);
-    return () => clearInterval(interval);
+    // React to real-time service status changes instead of polling
+    const unsub = window.jam.services.onChanged(() => refresh());
+    return () => unsub();
   }, [refresh]);
 
   const filtered = useMemo(() => {
@@ -48,14 +49,13 @@ export const ServicePanel: React.FC = () => {
 
   const handleStop = useCallback(async (port: number) => {
     await window.jam.services.stop(port);
-    refresh();
-  }, [refresh]);
+    // UI updates automatically via services:changed event subscription
+  }, []);
 
   const handleRestart = useCallback(async (serviceName: string) => {
     await window.jam.services.restart(serviceName);
-    setTimeout(refresh, 500);
-    setTimeout(refresh, 3000);
-  }, [refresh]);
+    // UI updates automatically via services:changed event subscription
+  }, []);
 
   const handleOpen = useCallback((port: number) => {
     window.jam.services.openUrl(port);

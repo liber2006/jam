@@ -49,7 +49,8 @@ export function useScrollToBottom(): UseScrollToBottomReturn {
 
   const shouldAutoScrollRef = useRef(true);
   const userInteractingRef = useRef(false);
-  const interactionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Tracks the pointer-down timestamp; interaction flag clears after 500ms via rAF polling */
+  const pointerDownAtRef = useRef(0);
 
   const [isAtBottom, setIsAtBottom] = useState(true);
 
@@ -70,12 +71,16 @@ export function useScrollToBottom(): UseScrollToBottomReturn {
 
   const onContainerPointerDown = useCallback(() => {
     userInteractingRef.current = true;
-    if (interactionTimeoutRef.current) {
-      clearTimeout(interactionTimeoutRef.current);
-    }
-    interactionTimeoutRef.current = setTimeout(() => {
-      userInteractingRef.current = false;
-    }, 500);
+    pointerDownAtRef.current = performance.now();
+    // Clear the interaction flag after 500ms using rAF polling (no setTimeout)
+    const checkDone = () => {
+      if (performance.now() - pointerDownAtRef.current >= 500) {
+        userInteractingRef.current = false;
+      } else {
+        requestAnimationFrame(checkDone);
+      }
+    };
+    requestAnimationFrame(checkDone);
   }, []);
 
   // IntersectionObserver: is the anchor visible?
@@ -117,9 +122,8 @@ export function useScrollToBottom(): UseScrollToBottomReturn {
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
       container.removeEventListener('scroll', handleScroll);
-      if (interactionTimeoutRef.current) {
-        clearTimeout(interactionTimeoutRef.current);
-      }
+      // Clear interaction flag on cleanup — rAF polling will stop naturally
+      userInteractingRef.current = false;
     };
   }, [container]);
 

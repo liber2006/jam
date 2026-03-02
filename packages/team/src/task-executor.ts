@@ -1,5 +1,5 @@
 import type { ITaskStore, IEventBus, Task } from '@jam/core';
-import { Events, createLogger } from '@jam/core';
+import { Events, createLogger, TimeoutTimer } from '@jam/core';
 
 const log = createLogger('TaskExecutor');
 
@@ -30,7 +30,7 @@ export class TaskExecutor {
   private readonly activeTaskCounts = new Map<string, number>();
   private readonly MAX_CONCURRENT_TASKS_PER_AGENT = 2;
   /** Active execution timers — keyed by taskId so we can cancel on completion */
-  private readonly executionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly executionTimers = new Map<string, TimeoutTimer>();
   private readonly timeoutMs: number;
 
   constructor(private readonly deps: TaskExecutorDeps) {
@@ -71,7 +71,7 @@ export class TaskExecutor {
     this.unsubscribers.length = 0;
     this.activeTaskCounts.clear();
     for (const timer of this.executionTimers.values()) {
-      clearTimeout(timer);
+      timer.dispose();
     }
     this.executionTimers.clear();
   }
@@ -87,7 +87,7 @@ export class TaskExecutor {
     // Clear the timeout timer if active
     const timer = this.executionTimers.get(taskId);
     if (timer) {
-      clearTimeout(timer);
+      timer.dispose();
       this.executionTimers.delete(taskId);
     }
 
@@ -271,7 +271,9 @@ export class TaskExecutor {
     prompt: string,
   ): Promise<{ success: boolean; text?: string; error?: string }> {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
+      const timer = new TimeoutTimer();
+      timer.cancelAndSet(() => {
+        timer.dispose();
         this.executionTimers.delete(taskId);
         log.warn(`Task ${taskId.slice(0, 8)} timed out after ${Math.round(this.timeoutMs / 1000)}s on agent ${agentId.slice(0, 8)}`);
         // Kill the child process if possible
@@ -283,12 +285,12 @@ export class TaskExecutor {
 
       this.deps.executeOnAgent(agentId, prompt).then(
         (result) => {
-          clearTimeout(timer);
+          timer.dispose();
           this.executionTimers.delete(taskId);
           resolve(result);
         },
         (err) => {
-          clearTimeout(timer);
+          timer.dispose();
           this.executionTimers.delete(taskId);
           resolve({ success: false, error: String(err) });
         },

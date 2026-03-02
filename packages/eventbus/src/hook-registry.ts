@@ -1,4 +1,7 @@
 import type { IEventBus } from '@jam/core';
+import { createLogger } from '@jam/core';
+
+const log = createLogger('HookRegistry');
 
 export type HookHandler = (payload: unknown) => void | Promise<void>;
 
@@ -22,7 +25,7 @@ export class HookRegistry {
       try {
         handler(payload);
       } catch (error) {
-        console.error(`[HookRegistry] Error in hook for "${event}":`, error);
+        log.error(`Error in hook for "${event}": ${String(error)}`);
       }
     });
 

@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
+import { useElapsedTime } from '@/hooks/useElapsedTime';
 import { SoulView } from '@/components/dashboard/SoulView';
 
 const mdPlugins = { code };
@@ -373,13 +374,9 @@ function TaskList({ tasks, onCancelTask }: {
   onCancelTask: (taskId: string) => void;
 }) {
   const hasRunning = tasks.some(t => t.status === 'running');
-  const [, setTick] = useState(0);
 
-  useEffect(() => {
-    if (!hasRunning) return;
-    const id = setInterval(() => setTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [hasRunning]);
+  // Re-render every second while any task is running (rAF-based, no setInterval)
+  useElapsedTime(hasRunning);
 
   if (tasks.length === 0) {
     return <p className="text-sm text-zinc-500 italic">No tasks assigned.</p>;
