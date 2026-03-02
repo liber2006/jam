@@ -17,7 +17,7 @@ interface ServiceEntry {
 }
 
 interface AgentDetailViewProps {
-  agent: { id: string; name: string; color: string };
+  agent: { id: string; name: string; color: string; avatarUrl?: string };
   soul: {
     persona: string;
     role: string;
@@ -95,12 +95,20 @@ export function AgentDetailView({
     <div className="flex flex-col h-full bg-zinc-900">
       {/* Header */}
       <div className="flex items-center gap-3 p-4 border-b border-zinc-700">
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold text-white"
-          style={{ backgroundColor: agent.color }}
-        >
-          {agent.name.charAt(0).toUpperCase()}
-        </div>
+        {agent.avatarUrl ? (
+          <img
+            src={agent.avatarUrl.startsWith('/') ? `jam-local://${agent.avatarUrl}` : agent.avatarUrl}
+            alt={agent.name}
+            className="w-10 h-10 rounded-full object-cover shrink-0"
+          />
+        ) : (
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold text-white"
+            style={{ backgroundColor: agent.color }}
+          >
+            {agent.name.charAt(0).toUpperCase()}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-semibold text-white">{agent.name}</h2>
           {soul?.role && (

@@ -2,7 +2,7 @@ import React from 'react';
 import { formatTokens, estimateCost } from '@/utils/format';
 
 interface AgentStatCardProps {
-  agent: { id: string; name: string; color: string; status: string; role?: string };
+  agent: { id: string; name: string; color: string; status: string; role?: string; avatarUrl?: string };
   stats: {
     tasksCompleted: number;
     tasksFailed: number;
@@ -29,11 +29,27 @@ export const AgentStatCard = React.memo(function AgentStatCard({ agent, stats, o
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
-        <div className="min-w-0 flex-1 mr-2">
-          <span className="text-sm font-bold text-white truncate block">{agent.name}</span>
-          {agent.role && (
-            <span className="text-[11px] text-zinc-500 truncate block">{agent.role}</span>
+        <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+          {agent.avatarUrl ? (
+            <img
+              src={agent.avatarUrl.startsWith('/') ? `jam-local://${agent.avatarUrl}` : agent.avatarUrl}
+              alt={agent.name}
+              className="w-7 h-7 rounded-full object-cover shrink-0"
+            />
+          ) : (
+            <div
+              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+              style={{ backgroundColor: `${agent.color}30`, color: agent.color }}
+            >
+              {agent.name.charAt(0).toUpperCase()}
+            </div>
           )}
+          <div className="min-w-0">
+            <span className="text-sm font-bold text-white truncate block">{agent.name}</span>
+            {agent.role && (
+              <span className="text-[11px] text-zinc-500 truncate block">{agent.role}</span>
+            )}
+          </div>
         </div>
         <span
           className={`text-xs px-2 py-0.5 rounded-full font-medium ${

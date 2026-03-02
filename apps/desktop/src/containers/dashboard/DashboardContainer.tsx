@@ -90,12 +90,20 @@ export function DashboardContainer() {
                           : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
                       }`}
                     >
-                      <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
-                        style={{ backgroundColor: a.profile.color }}
-                      >
-                        {a.profile.name.charAt(0).toUpperCase()}
-                      </div>
+                      {a.profile.avatarUrl ? (
+                        <img
+                          src={a.profile.avatarUrl.startsWith('/') ? `jam-local://${a.profile.avatarUrl}` : a.profile.avatarUrl}
+                          alt={a.profile.name}
+                          className="w-7 h-7 rounded-full object-cover shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                          style={{ backgroundColor: a.profile.color }}
+                        >
+                          {a.profile.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{a.profile.name}</div>
                         <div className={`text-[10px] ${isRunning ? 'text-green-400' : 'text-zinc-500'}`}>

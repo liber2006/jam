@@ -155,15 +155,23 @@ export const AgentsOverviewContainer: React.FC = () => {
                 >
                   {/* Top row: avatar + name + status */}
                   <div className="flex items-start gap-3 mb-3">
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-                      style={{
-                        backgroundColor: `${agent.profile.color}20`,
-                        color: agent.profile.color,
-                      }}
-                    >
-                      {agent.profile.name.charAt(0).toUpperCase()}
-                    </div>
+                    {agent.profile.avatarUrl ? (
+                      <img
+                        src={agent.profile.avatarUrl.startsWith('/') ? `jam-local://${agent.profile.avatarUrl}` : agent.profile.avatarUrl}
+                        alt={agent.profile.name}
+                        className="w-10 h-10 rounded-full object-cover shrink-0"
+                      />
+                    ) : (
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+                        style={{
+                          backgroundColor: `${agent.profile.color}20`,
+                          color: agent.profile.color,
+                        }}
+                      >
+                        {agent.profile.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="text-sm font-medium text-zinc-100 truncate">

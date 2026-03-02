@@ -12,7 +12,7 @@ interface StatEntry {
 }
 
 interface TeamOverviewProps {
-  agents: Array<{ id: string; name: string; color: string; status: string; role?: string }>;
+  agents: Array<{ id: string; name: string; color: string; avatarUrl?: string; status: string; role?: string }>;
   stats: Record<string, StatEntry>;
   onSelectAgent: (agentId: string) => void;
 }

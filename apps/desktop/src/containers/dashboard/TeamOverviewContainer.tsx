@@ -42,6 +42,7 @@ export function TeamOverviewContainer({ onSelectAgent }: TeamOverviewContainerPr
     id: a.profile.id,
     name: a.profile.name,
     color: a.profile.color,
+    avatarUrl: a.profile.avatarUrl,
     status: a.status,
     role: souls[a.profile.id]?.role ?? undefined,
   }));

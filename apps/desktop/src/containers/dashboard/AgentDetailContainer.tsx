@@ -161,6 +161,7 @@ export function AgentDetailContainer({ agentId }: AgentDetailContainerProps) {
         id: agent.profile.id,
         name: agent.profile.name,
         color: agent.profile.color,
+        avatarUrl: agent.profile.avatarUrl,
       }}
       soul={soul}
       stats={agentStats}

@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { JAM_SYSTEM_AGENT_ID } from '@jam/core';
 
 interface RelationshipGraphProps {
-  agents: Array<{ id: string; name: string; color: string }>;
+  agents: Array<{ id: string; name: string; color: string; avatarUrl?: string }>;
   relationships: Array<{
     sourceAgentId: string;
     targetAgentId: string;
@@ -87,11 +87,27 @@ export const RelationshipGraph = React.memo(function RelationshipGraph({
           );
         })}
 
+        {/* Clip paths for avatar images */}
+        <defs>
+          {positions.map((agent) => {
+            const isJam = agent.id === JAM_SYSTEM_AGENT_ID;
+            const r = isJam ? 16 : 12;
+            return (
+              <clipPath key={`clip-${agent.id}`} id={`clip-${agent.id}`}>
+                <circle cx={agent.x} cy={agent.y} r={r} />
+              </clipPath>
+            );
+          })}
+        </defs>
+
         {/* Nodes */}
         {positions.map((agent) => {
           const isJam = agent.id === JAM_SYSTEM_AGENT_ID;
           const outerR = isJam ? 24 : 18;
           const innerR = isJam ? 16 : 12;
+          const avatarSrc = agent.avatarUrl
+            ? agent.avatarUrl.startsWith('/') ? `jam-local://${agent.avatarUrl}` : agent.avatarUrl
+            : null;
 
           return (
             <g
@@ -108,18 +124,32 @@ export const RelationshipGraph = React.memo(function RelationshipGraph({
                 stroke={agent.color}
                 strokeWidth={2}
               />
-              <circle cx={agent.x} cy={agent.y} r={innerR} fill={agent.color} />
-              <text
-                x={agent.x}
-                y={agent.y}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fill="white"
-                fontSize={isJam ? 9 : 9}
-                fontWeight="bold"
-              >
-                {isJam ? 'JAM' : agent.name.charAt(0).toUpperCase()}
-              </text>
+              {avatarSrc ? (
+                <image
+                  href={avatarSrc}
+                  x={agent.x - innerR}
+                  y={agent.y - innerR}
+                  width={innerR * 2}
+                  height={innerR * 2}
+                  clipPath={`url(#clip-${agent.id})`}
+                  preserveAspectRatio="xMidYMid slice"
+                />
+              ) : (
+                <>
+                  <circle cx={agent.x} cy={agent.y} r={innerR} fill={agent.color} />
+                  <text
+                    x={agent.x}
+                    y={agent.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="white"
+                    fontSize={9}
+                    fontWeight="bold"
+                  >
+                    {isJam ? 'JAM' : agent.name.charAt(0).toUpperCase()}
+                  </text>
+                </>
+              )}
               <text
                 x={agent.x}
                 y={agent.y + (isJam ? 30 : 26)}
