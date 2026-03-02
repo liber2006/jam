@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ITaskStore, IEventBus } from '@jam/core';
+import type { ITaskStore, IEventBus, AgentProfile } from '@jam/core';
 import { Events, createLogger } from '@jam/core';
 import { DebouncedFileWriter } from './utils/debounced-writer.js';
 
@@ -23,6 +23,8 @@ export class InboxWatcher {
   constructor(
     private readonly taskStore: ITaskStore,
     private readonly eventBus: IEventBus,
+    private readonly onCreateAgent?: (input: Omit<AgentProfile, 'id'>) =>
+      { success: boolean; agentId?: string; error?: string },
   ) {}
 
   watchAgent(agentId: string, cwd: string): void {
@@ -65,6 +67,36 @@ export class InboxWatcher {
     this.processing.clear();
   }
 
+  private handleCreateAgent(request: Record<string, unknown>): void {
+    if (!this.onCreateAgent) {
+      log.warn('create-agent request received but no handler configured');
+      return;
+    }
+
+    const name = request.name as string | undefined;
+    if (!name) {
+      log.warn('create-agent: missing required "name" field');
+      return;
+    }
+
+    const result = this.onCreateAgent({
+      name,
+      runtime: (request.runtime as string) || 'claude-code',
+      model: request.model as string | undefined,
+      systemPrompt: request.systemPrompt as string | undefined,
+      color: (request.color as string) || '#3b82f6',
+      voice: (request.voice as { ttsVoiceId: string }) || { ttsVoiceId: 'onyx' },
+      cwd: request.cwd as string | undefined,
+      autoStart: request.autoStart as boolean | undefined,
+    });
+
+    if (result.success) {
+      log.info(`Created agent "${name}" via inbox (${result.agentId})`);
+    } else {
+      log.warn(`Failed to create agent "${name}" via inbox: ${result.error}`);
+    }
+  }
+
   private async processInbox(
     agentId: string,
     inboxPath: string,
@@ -80,6 +112,7 @@ export class InboxWatcher {
       for (const line of lines) {
         try {
           const request = JSON.parse(line) as {
+            type?: string;
             title?: string;
             description?: string;
             priority?: string;
@@ -87,6 +120,12 @@ export class InboxWatcher {
             from?: string;
             tags?: string[];
           };
+
+          // Handle agent creation requests
+          if (request.type === 'create-agent') {
+            this.handleCreateAgent(request as Record<string, unknown>);
+            continue;
+          }
 
           const description = request.description || '';
 

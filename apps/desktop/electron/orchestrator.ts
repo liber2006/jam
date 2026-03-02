@@ -463,7 +463,11 @@ export class Orchestrator {
       );
     }
 
-    this.inboxWatcher = new InboxWatcher(this.taskStore, this.eventBus);
+    this.inboxWatcher = new InboxWatcher(
+      this.taskStore,
+      this.eventBus,
+      (input) => this.agentManager.create(input),
+    );
     this.teamEventHandler = new TeamEventHandler(
       this.eventBus,
       this.statsStore,
@@ -972,9 +976,53 @@ export class Orchestrator {
     await this.speakToRenderer(agentId, text);
   }
 
+  /**
+   * Import agent folders from disk that aren't yet registered in the store.
+   * Looks for `~/.jam/agents/<name>/SOUL.md` and calls `agentManager.create()`.
+   */
+  private async bootstrapDiskAgents(): Promise<void> {
+    const agentsDir = join(homedir(), '.jam', 'agents');
+    const COLORS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#ec4899', '#06b6d4'];
+
+    let entries: string[];
+    try {
+      entries = await readdir(agentsDir);
+    } catch {
+      return;
+    }
+
+    const knownCwds = new Set(
+      this.agentManager.list().map((a) => a.profile.cwd).filter(Boolean),
+    );
+
+    for (const entry of entries) {
+      if (entry.startsWith('.')) continue;
+      const cwd = join(agentsDir, entry);
+      if (knownCwds.has(cwd)) continue;
+      if (!existsSync(join(cwd, 'SOUL.md'))) continue;
+
+      const name = entry.charAt(0).toUpperCase() + entry.slice(1);
+      const color = COLORS[this.agentManager.list().length % COLORS.length];
+      const result = this.agentManager.create({
+        name,
+        runtime: 'claude-code',
+        color,
+        voice: { ttsVoiceId: 'onyx' },
+        cwd,
+      });
+
+      if (result.success) {
+        log.info(`Imported disk agent: ${name} (${result.agentId})`);
+      }
+    }
+  }
+
   async startAutoStartAgents(): Promise<void> {
     // Wait for Docker image to be ready before launching any containers
     await this.imageReady;
+
+    // Import agent folders from disk that aren't registered yet (e.g. created by JAM)
+    await this.bootstrapDiskAgents();
 
     // Clean up any LaunchAgent plists agents may have installed
     await this.cleanupAgentLaunchAgents();

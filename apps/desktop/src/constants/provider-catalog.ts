@@ -58,6 +58,7 @@ export const TTS_VOICES: Record<TTSProvider, CatalogEntry[]> = {
 
 export const AGENT_MODELS: CatalogEntry[] = [
   { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
   { id: 'o4-mini', label: 'OpenAI o4-mini' },
