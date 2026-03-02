@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { formatTimeAgo, formatElapsed } from '@/utils/format';
+import { useElapsedTime } from '@/hooks/useElapsedTime';
 
 interface TaskCardProps {
   task: {
@@ -37,16 +38,11 @@ const statusStyles: Record<string, string> = {
 export const TaskCard = React.memo(function TaskCard({ task, agentName, agentColor, agents, onDelete, onCancel, onAssign }: TaskCardProps) {
   const isRunning = task.status === 'running';
   const isDone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
-  const [, setTick] = useState(0);
   const [showAssign, setShowAssign] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Re-render every second while running to update elapsed time
-  useEffect(() => {
-    if (!isRunning) return;
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [isRunning]);
+  // Re-render every second while running to update elapsed time (rAF-based, no setInterval)
+  useElapsedTime(isRunning);
 
   // Close dropdown on outside click
   useEffect(() => {

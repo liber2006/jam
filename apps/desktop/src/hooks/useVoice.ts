@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store';
+import { IntervalTimer, TimeoutTimer } from '@jam/core';
 
 // Fallback constants — overridden by config from main process
 const DEFAULT_VAD_THRESHOLD = 0.03;
@@ -25,8 +26,8 @@ export function useVoice() {
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const vadIntervalRef = useRef<number | null>(null);
-  const silenceTimerRef = useRef<number | null>(null);
+  const vadTimerRef = useRef(new IntervalTimer());
+  const silenceTimerRef = useRef(new TimeoutTimer());
   const silentChecksRef = useRef(0);
   const isRecordingRef = useRef(false);
   const recordingStartRef = useRef<number>(0);
@@ -158,14 +159,8 @@ export function useVoice() {
 
   // Release mic stream and cleanup
   const releaseMicStream = useCallback(() => {
-    if (vadIntervalRef.current !== null) {
-      clearInterval(vadIntervalRef.current);
-      vadIntervalRef.current = null;
-    }
-    if (silenceTimerRef.current !== null) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
+    vadTimerRef.current.cancel();
+    silenceTimerRef.current.cancel();
 
     endRecording();
 
@@ -187,20 +182,17 @@ export function useVoice() {
       beginRecording();
 
       // Poll audio level for waveform visualization during PTT
-      vadIntervalRef.current = window.setInterval(() => {
+      vadTimerRef.current.cancelAndSet(() => {
         audioLevelRef.current = getAudioLevel();
       }, VAD_CHECK_INTERVAL_MS);
     } catch (error) {
-      console.error('Failed to start audio capture:', error);
+      console.error('[Voice] Failed to start audio capture:', error);
       setMicError(error instanceof Error ? error.message : 'Failed to access microphone');
     }
   }, [acquireMicStream, beginRecording, getAudioLevel]);
 
   const stopCapture = useCallback(() => {
-    if (vadIntervalRef.current !== null) {
-      clearInterval(vadIntervalRef.current);
-      vadIntervalRef.current = null;
-    }
+    vadTimerRef.current.cancel();
     endRecording();
     // In PTT mode, release the stream when done
     if (voiceMode === 'push-to-talk') {
@@ -217,7 +209,7 @@ export function useVoice() {
       setVoiceState('idle');
 
       // Start VAD polling
-      vadIntervalRef.current = window.setInterval(() => {
+      vadTimerRef.current.cancelAndSet(() => {
         const level = getAudioLevel();
         audioLevelRef.current = level;
 
@@ -228,24 +220,20 @@ export function useVoice() {
           }
           // Reset silence tracking
           silentChecksRef.current = 0;
-          if (silenceTimerRef.current !== null) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-          }
+          silenceTimerRef.current.cancel();
         } else if (isRecordingRef.current) {
           // Below threshold while recording — require sustained silence before countdown
           silentChecksRef.current++;
-          if (silentChecksRef.current >= SILENCE_DEBOUNCE_COUNT && silenceTimerRef.current === null) {
-            silenceTimerRef.current = window.setTimeout(() => {
+          if (silentChecksRef.current >= SILENCE_DEBOUNCE_COUNT && !silenceTimerRef.current.isScheduled) {
+            silenceTimerRef.current.cancelAndSet(() => {
               endRecording();
-              silenceTimerRef.current = null;
               silentChecksRef.current = 0;
             }, SILENCE_TIMEOUT_MS);
           }
         }
       }, VAD_CHECK_INTERVAL_MS);
     } catch (error) {
-      console.error('Failed to start always-listening mode:', error);
+      console.error('[Voice] Failed to start always-listening mode:', error);
       setMicError(error instanceof Error ? error.message : 'Failed to access microphone');
     }
   }, [acquireMicStream, setVoiceState, getAudioLevel, beginRecording, endRecording]);

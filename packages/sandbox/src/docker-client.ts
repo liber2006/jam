@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import type { IDockerClient } from '@jam/core';
-import { createLogger } from '@jam/core';
+import { createLogger, TimeoutTimer } from '@jam/core';
 
 const log = createLogger('DockerClient');
 
@@ -86,13 +86,14 @@ export class DockerClient implements IDockerClient {
       proc.stdout?.on('data', handleData);
       proc.stderr?.on('data', handleData);
 
-      const timer = setTimeout(() => {
+      const timer = new TimeoutTimer();
+      timer.cancelAndSet(() => {
         proc.kill('SIGKILL');
         reject(new Error('Docker image build timed out after 10 minutes'));
       }, 600_000);
 
       proc.on('close', (code) => {
-        clearTimeout(timer);
+        timer.dispose();
         if (code === 0) {
           log.info(`Image ${tag} built successfully`);
           resolve();
@@ -102,7 +103,7 @@ export class DockerClient implements IDockerClient {
       });
 
       proc.on('error', (err) => {
-        clearTimeout(timer);
+        timer.dispose();
         reject(err);
       });
     });

@@ -59,7 +59,7 @@ export const ChatContainer: React.FC = () => {
 
       setHasMoreHistory(result.hasMore);
     } catch (err) {
-      console.error('Failed to load chat history:', err);
+      console.error('[Chat] Failed to load chat history:', err);
     } finally {
       setIsLoadingHistory(false);
       loadingRef.current = false;

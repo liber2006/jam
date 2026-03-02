@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/store';
+import { TimeoutTimer } from '@jam/core';
 import type { AgentEntry } from '@/store/agentSlice';
 import type { ChatMessage } from '@/store/chatSlice';
 import type { SoulEntry } from '@/store/teamSlice';
@@ -14,6 +15,7 @@ import type { SoulEntry } from '@/store/teamSlice';
 export function useIPCSubscriptions(enqueueTTS: (data: string) => void): void {
   useEffect(() => {
     const store = () => useAppStore.getState();
+    const transcriptTimer = new TimeoutTimer();
 
     // Load initial agent list, then load conversation history
     window.jam.agents.list().then((agents) => {
@@ -103,7 +105,9 @@ export function useIPCSubscriptions(enqueueTTS: (data: string) => void): void {
       ({ text, isFinal }) => {
         store().setTranscript({ text, isFinal });
         if (isFinal) {
-          setTimeout(() => store().setTranscript(null), 2000);
+          transcriptTimer.cancelAndSet(() => {
+            store().setTranscript(null);
+          }, 2000);
         }
       },
     );
@@ -266,6 +270,7 @@ export function useIPCSubscriptions(enqueueTTS: (data: string) => void): void {
     // This prevents double-handling IPC events.
 
     return () => {
+      transcriptTimer.dispose();
       unsubStatusChange();
       unsubCreated();
       unsubDeleted();

@@ -45,12 +45,8 @@ export function AgentDetailContainer({ agentId }: AgentDetailContainerProps) {
       setServices(agentServices);
     });
 
-    // Light fallback poll (30s) in case events are missed
-    const interval = setInterval(refreshServices, 30_000);
-
     return () => {
       unsubChanged();
-      clearInterval(interval);
     };
   }, [refreshServices, agentId]);
 

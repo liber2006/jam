@@ -1,4 +1,5 @@
 import type { AgentId } from '@jam/core';
+import { TimeoutTimer } from '@jam/core';
 import type { PtyOutputHandler, PtyExitHandler } from './pty-manager.js';
 
 export const SCROLLBACK_MAX = 10_000;
@@ -34,7 +35,7 @@ export interface WritablePty {
  */
 export class PtyDataHandler {
   private outputBuffer = '';
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly flushTimer = new TimeoutTimer();
   private readonly cursorResponse = buildCursorPositionResponse();
   readonly scrollback: string[] = [];
 
@@ -62,16 +63,13 @@ export class PtyDataHandler {
 
     // Batch and flush
     this.outputBuffer += cleaned;
-    if (!this.flushTimer) {
-      this.flushTimer = setTimeout(() => {
-        try {
-          this.outputHandler()?.(this.agentId, this.outputBuffer);
-        } finally {
-          this.outputBuffer = '';
-          this.flushTimer = null;
-        }
-      }, FLUSH_INTERVAL_MS);
-    }
+    this.flushTimer.setIfNotSet(() => {
+      try {
+        this.outputHandler()?.(this.agentId, this.outputBuffer);
+      } finally {
+        this.outputBuffer = '';
+      }
+    }, FLUSH_INTERVAL_MS);
   }
 
   /** Flush remaining buffered output and clean up timers */
@@ -80,10 +78,7 @@ export class PtyDataHandler {
       this.outputHandler()?.(this.agentId, this.outputBuffer);
       this.outputBuffer = '';
     }
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.flushTimer.dispose();
   }
 
   /** Get the last N lines of scrollback for crash diagnostics */

@@ -1,4 +1,7 @@
 import type { IEventBus } from '@jam/core';
+import { createLogger } from '@jam/core';
+
+const log = createLogger('EventBus');
 
 type Handler = (payload: unknown) => void;
 
@@ -13,7 +16,7 @@ export class EventBus implements IEventBus {
       try {
         handler(payload);
       } catch (error) {
-        console.error(`[EventBus] Error in handler for "${event}":`, error);
+        log.error(`Error in handler for "${event}": ${String(error)}`);
       }
     }
   }

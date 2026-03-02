@@ -8,7 +8,7 @@ import {
   systemPreferences,
 } from 'electron';
 import path from 'node:path';
-import { createLogger, addLogTransport, type LogEntry } from '@jam/core';
+import { createLogger, addLogTransport, Batcher, type LogEntry } from '@jam/core';
 import { Orchestrator } from './orchestrator';
 import { CommandRouter } from './command-router';
 import { fixPath } from './utils/path-fix';
@@ -55,26 +55,23 @@ if (process.env.VITE_DEV_SERVER_URL) {
 // --- Log Buffer & IPC Transport (batched) ---
 const LOG_BUFFER_SIZE = 500;
 const logBuffer: LogEntry[] = [];
-const LOG_IPC_BATCH_MS = 200;
-let logIpcPending: LogEntry[] = [];
-let logIpcTimer: ReturnType<typeof setTimeout> | null = null;
 
-function flushLogIpc(): void {
-  logIpcTimer = null;
-  if (logIpcPending.length === 0) return;
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('logs:batch', logIpcPending);
-  }
-  logIpcPending = [];
-}
+const logBatcher = new Batcher<LogEntry[]>(
+  200,
+  (batch) => {
+    const entries = batch.get('logs');
+    if (!entries || entries.length === 0) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('logs:batch', entries);
+    }
+  },
+  (existing, incoming) => { existing.push(...incoming); return existing; },
+);
 
 addLogTransport((entry: LogEntry) => {
   logBuffer.push(entry);
   if (logBuffer.length > LOG_BUFFER_SIZE) logBuffer.shift();
-  logIpcPending.push(entry);
-  if (!logIpcTimer) {
-    logIpcTimer = setTimeout(flushLogIpc, LOG_IPC_BATCH_MS);
-  }
+  logBatcher.add('logs', [entry]);
 });
 
 // --- Single instance lock ---

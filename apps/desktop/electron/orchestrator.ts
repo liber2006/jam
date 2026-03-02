@@ -37,7 +37,7 @@ import {
   OpenAITTSProvider,
 } from '@jam/voice';
 import type { ISTTProvider, ITTSProvider, AgentState } from '@jam/core';
-import { createLogger, JAM_SYSTEM_PROFILE } from '@jam/core';
+import { createLogger, JAM_SYSTEM_PROFILE, Batcher } from '@jam/core';
 import { FileMemoryStore } from '@jam/memory';
 import { BrainClient, BrainMemoryStore } from '@jam/brain';
 import {
@@ -611,48 +611,43 @@ export class Orchestrator {
 
     // Batch terminal + execute output IPC sends to reduce cross-process overhead.
     // PTY data already arrives batched at ~16ms; we coalesce at ~32ms to halve IPC calls.
-    const termBatch = new Map<string, string>();
-    let termTimer: ReturnType<typeof setTimeout> | null = null;
-    const flushTermBatch = () => {
-      termTimer = null;
-      for (const [agentId, output] of termBatch) {
-        this.sendToRenderer('terminal:data', { agentId, output });
-      }
-      termBatch.clear();
-    };
+    const termBatcher = new Batcher<string>(
+      32,
+      (batch) => {
+        for (const [agentId, output] of batch) {
+          this.sendToRenderer('terminal:data', { agentId, output });
+        }
+      },
+      (a, b) => a + b,
+    );
 
     this.eventBus.on('agent:output', (data: { agentId: string; data: string }) => {
-      termBatch.set(data.agentId, (termBatch.get(data.agentId) ?? '') + data.data);
-      if (!termTimer) termTimer = setTimeout(flushTermBatch, 32);
+      termBatcher.add(data.agentId, data.data);
     });
 
     // Execute output arrives per-chunk with no upstream batching — coalesce at 50ms
-    const execBatch = new Map<string, { chunks: string[]; clear: boolean }>();
-    let execTimer: ReturnType<typeof setTimeout> | null = null;
-    const flushExecBatch = () => {
-      execTimer = null;
-      for (const [agentId, { chunks, clear }] of execBatch) {
-        this.sendToRenderer('terminal:executeOutput', {
-          agentId,
-          output: chunks.join(''),
-          clear,
-        });
-      }
-      execBatch.clear();
-    };
+    const execBatcher = new Batcher<{ chunks: string[]; clear: boolean }>(
+      50,
+      (batch) => {
+        for (const [agentId, { chunks, clear }] of batch) {
+          this.sendToRenderer('terminal:executeOutput', {
+            agentId,
+            output: chunks.join(''),
+            clear,
+          });
+        }
+      },
+      (existing, incoming) => {
+        if (incoming.clear) {
+          return { chunks: [...incoming.chunks], clear: true };
+        }
+        existing.chunks.push(...incoming.chunks);
+        return existing;
+      },
+    );
 
     this.eventBus.on('agent:executeOutput', (data: { agentId: string; data: string; clear?: boolean }) => {
-      const existing = execBatch.get(data.agentId);
-      if (existing) {
-        if (data.clear) {
-          existing.chunks.length = 0;
-          existing.clear = true;
-        }
-        existing.chunks.push(data.data);
-      } else {
-        execBatch.set(data.agentId, { chunks: [data.data], clear: !!data.clear });
-      }
-      if (!execTimer) execTimer = setTimeout(flushExecBatch, 50);
+      execBatcher.add(data.agentId, { chunks: [data.data], clear: !!data.clear });
     });
 
     this.eventBus.on('voice:transcription', (data) => {

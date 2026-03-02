@@ -1,5 +1,5 @@
 import type { AgentId, IContainerManager, IDockerClient } from '@jam/core';
-import { createLogger } from '@jam/core';
+import { createLogger, TimeoutTimer } from '@jam/core';
 import type {
   IPtyManager,
   PtySpawnOptions,
@@ -30,6 +30,7 @@ export class SandboxedPtyManager implements IPtyManager {
   private instances = new Map<string, SandboxedPtyInstance>();
   private outputHandler: PtyOutputHandler | null = null;
   private exitHandler: PtyExitHandler | null = null;
+  private exitWaiters = new Map<string, Array<() => void>>();
 
   constructor(
     private readonly containerManager: IContainerManager,
@@ -99,6 +100,11 @@ export class SandboxedPtyManager implements IPtyManager {
         const lastOutput = dataHandler.getLastOutput();
         this.instances.delete(agentId);
         this.exitHandler?.(agentId, exitCode, lastOutput);
+        const waiters = this.exitWaiters.get(agentId);
+        if (waiters) {
+          this.exitWaiters.delete(agentId);
+          for (const resolve of waiters) resolve();
+        }
       });
 
       this.instances.set(agentId, instance);
@@ -132,6 +138,28 @@ export class SandboxedPtyManager implements IPtyManager {
       // The container manager handles the stop.
       this.containerManager.stop(agentId);
     }
+  }
+
+  async waitForExit(agentId: AgentId, timeoutMs = 5000): Promise<void> {
+    if (!this.instances.has(agentId)) return;
+    return new Promise<void>((resolve) => {
+      const waiters = this.exitWaiters.get(agentId) ?? [];
+      this.exitWaiters.set(agentId, waiters);
+      const timer = new TimeoutTimer();
+      const done = () => {
+        timer.dispose();
+        resolve();
+      };
+      timer.cancelAndSet(() => {
+        const arr = this.exitWaiters.get(agentId);
+        if (arr) {
+          const idx = arr.indexOf(done);
+          if (idx >= 0) arr.splice(idx, 1);
+        }
+        resolve();
+      }, timeoutMs);
+      waiters.push(done);
+    });
   }
 
   getScrollback(agentId: AgentId): string {
