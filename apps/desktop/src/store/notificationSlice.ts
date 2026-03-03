@@ -32,13 +32,9 @@ export const createNotificationSlice: StateCreator<
   notifications: [],
 
   addNotification: (n) =>
-    set((state) => {
-      const updated = [n, ...state.notifications];
-      if (updated.length > MAX_NOTIFICATIONS) {
-        updated.length = MAX_NOTIFICATIONS;
-      }
-      return { notifications: updated };
-    }),
+    set((state) => ({
+      notifications: [n, ...state.notifications].slice(0, MAX_NOTIFICATIONS),
+    })),
 
   markNotificationRead: (id) =>
     set((state) => ({

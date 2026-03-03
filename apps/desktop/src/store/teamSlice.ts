@@ -64,8 +64,9 @@ export interface TeamSlice {
   channels: ChannelEntry[];
   activeChannelId: string | null;
   channelMessages: Record<string, ChannelMessageEntry[]>;
-  /** Agents currently undergoing reflection — persists across tab switches */
-  reflectingAgents: Set<string>;
+  /** Agents currently undergoing reflection — persists across tab switches.
+   *  Record<agentId, true> keeps this JSON-serializable and Zustand-shallow-comparable. */
+  reflectingAgents: Record<string, true>;
 
   setStats: (agentId: string, stats: StatsEntry) => void;
   setAllStats: (stats: Record<string, StatsEntry>) => void;
@@ -91,7 +92,7 @@ export const createTeamSlice: StateCreator<
   channels: [],
   activeChannelId: null,
   channelMessages: {},
-  reflectingAgents: new Set<string>(),
+  reflectingAgents: {},
 
   setStats: (agentId, stats) =>
     set((state) => ({
@@ -150,12 +151,12 @@ export const createTeamSlice: StateCreator<
 
   setReflecting: (agentId, reflecting) =>
     set((state) => {
-      const has = state.reflectingAgents.has(agentId);
+      const has = agentId in state.reflectingAgents;
       if (reflecting && has) return state;
       if (!reflecting && !has) return state;
-      const next = new Set(state.reflectingAgents);
-      if (reflecting) next.add(agentId);
-      else next.delete(agentId);
+      const next = { ...state.reflectingAgents };
+      if (reflecting) next[agentId] = true;
+      else delete next[agentId];
       return { reflectingAgents: next };
     }),
 });

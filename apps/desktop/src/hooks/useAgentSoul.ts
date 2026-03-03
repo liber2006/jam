@@ -4,7 +4,7 @@ import type { SoulEntry } from '@/store/teamSlice';
 
 export function useAgentSoul(agentId: string) {
   const soul = useAppStore((s) => s.souls[agentId]);
-  const isReflecting = useAppStore((s) => s.reflectingAgents.has(agentId));
+  const isReflecting = useAppStore((s) => agentId in s.reflectingAgents);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {

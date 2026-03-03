@@ -33,6 +33,8 @@ export interface TerminalSlice {
   flushTerminalData: (agentId: string) => void;
   clearTerminal: (agentId: string) => void;
   appendExecuteOutput: (agentId: string, data: string, clear?: boolean) => void;
+  /** Cancel pending batch timers and clear queues. Intended for tests and HMR cleanup. */
+  _cleanupBatchers: () => void;
 }
 
 export const createTerminalSlice: StateCreator<
@@ -60,10 +62,7 @@ export const createTerminalSlice: StateCreator<
       const updated = { ...state.terminalBuffers };
       for (const [agentId, chunks] of batch) {
         const existing = updated[agentId] ?? { pendingData: [], scrollback: [] };
-        const scrollback = existing.scrollback.concat(chunks);
-        if (scrollback.length > MAX_SCROLLBACK) {
-          scrollback.splice(0, scrollback.length - MAX_SCROLLBACK);
-        }
+        const scrollback = existing.scrollback.concat(chunks).slice(-MAX_SCROLLBACK);
         let pendingData = existing.pendingData.concat(chunks);
         // Cap pending data to prevent unbounded memory growth when terminal is not mounted
         if (pendingData.length > MAX_PENDING_DATA) {
@@ -149,6 +148,13 @@ export const createTerminalSlice: StateCreator<
       if (!executeOutputTimer) {
         executeOutputTimer = setTimeout(flushExecuteOutputBatch, EXECUTE_OUTPUT_BATCH_MS);
       }
+    },
+
+    _cleanupBatchers: () => {
+      if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
+      if (executeOutputTimer) { clearTimeout(executeOutputTimer); executeOutputTimer = null; }
+      terminalBatchQueue.clear();
+      executeOutputQueue.clear();
     },
   };
 };
