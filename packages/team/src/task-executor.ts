@@ -5,6 +5,8 @@ const log = createLogger('TaskExecutor');
 
 /** Safety-net timeout — only kills truly stuck tasks. Users can stop tasks manually from the UI. */
 const DEFAULT_TIMEOUT_MS = 6 * 60 * 60 * 1000; // 6 hours
+/** Grace period before draining tasks on AGENTS_READY — lets the renderer settle first */
+const DRAIN_GRACE_MS = 10_000;
 
 export interface TaskExecutorDeps {
   taskStore: ITaskStore;
@@ -17,6 +19,8 @@ export interface TaskExecutorDeps {
   abortAgent?: (agentId: string) => void;
   /** Max execution time per task in ms (default: 5 min) */
   timeoutMs?: number;
+  /** Grace period before draining stuck tasks on AGENTS_READY (default: 10s) */
+  drainGraceMs?: number;
 }
 
 /**
@@ -36,13 +40,17 @@ export class TaskExecutor {
   /** Active execution timers — keyed by taskId so we can cancel on completion */
   private readonly executionTimers = new Map<string, TimeoutTimer>();
   private readonly timeoutMs: number;
+  private readonly drainGraceMs: number;
   /** When true, no new tasks are picked up — running tasks finish naturally */
   private _paused = false;
   /** Total active executions across all agents */
   private globalActiveCount = 0;
+  /** Pending drain timer — cancelled on stop() */
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly deps: TaskExecutorDeps) {
     this.timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.drainGraceMs = deps.drainGraceMs ?? DRAIN_GRACE_MS;
   }
 
   get paused(): boolean {
@@ -83,10 +91,16 @@ export class TaskExecutor {
       }),
     );
 
-    // Drain stuck tasks from previous sessions once agents are ready
+    // Drain stuck tasks from previous sessions once agents are ready.
+    // Delay by a grace period so the renderer can finish its initial mount
+    // before we spawn heavy CLI processes (each executeDetached is a full agent).
     this.unsubscribers.push(
       this.deps.eventBus.on(Events.AGENTS_READY, () => {
-        this.drainAssignedTasks();
+        log.info(`Agents ready — will drain assigned tasks in ${this.drainGraceMs / 1000}s`);
+        this.drainTimer = setTimeout(() => {
+          this.drainTimer = null;
+          this.drainAssignedTasks();
+        }, this.drainGraceMs);
       }),
     );
 
@@ -94,6 +108,10 @@ export class TaskExecutor {
   }
 
   stop(): void {
+    if (this.drainTimer) {
+      clearTimeout(this.drainTimer);
+      this.drainTimer = null;
+    }
     for (const unsub of this.unsubscribers) {
       unsub();
     }

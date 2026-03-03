@@ -193,6 +193,7 @@ export interface JamAPI {
     onSandboxProgress: (
       callback: (data: { status: string; message: string }) => void,
     ) => () => void;
+    onSystemResumed: (callback: () => void) => () => void;
   };
 
   logs: {

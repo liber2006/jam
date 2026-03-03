@@ -22,9 +22,12 @@ export function registerTaskHandlers(deps: TaskHandlerDeps): void {
   ipcMain.handle(
     'tasks:create',
     async (_, input: { title: string; description: string; priority?: string; assignedTo?: string; tags?: string[] }) => {
+      if (!input.title || typeof input.title !== 'string' || !input.title.trim()) {
+        return { success: false, error: 'Task title is required' };
+      }
       try {
         const task = await taskStore.create({
-          title: input.title,
+          title: input.title.trim(),
           description: input.description || '',
           status: 'pending',
           priority: (input.priority as 'low' | 'normal' | 'high' | 'critical') ?? 'normal',

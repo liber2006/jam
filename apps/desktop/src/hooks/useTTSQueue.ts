@@ -11,8 +11,10 @@ export function useTTSQueue() {
   const playingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const interruptTTS = () => {
+    if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
     queueRef.current.length = 0;
     if (audioRef.current) {
       audioRef.current.pause();
@@ -69,12 +71,30 @@ export function useTTSQueue() {
 
       audio.play().catch((err) => {
         console.error('[TTS] Failed to play audio:', err);
+        if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
         if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
         audioRef.current = null;
         playNextTTS();
       });
 
+      // Safety timeout: if onended never fires (e.g., after system sleep),
+      // force-advance the queue after 30 seconds.
+      if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
+      safetyTimerRef.current = setTimeout(() => {
+        safetyTimerRef.current = null;
+        if (playingRef.current && audioRef.current === audio) {
+          console.warn('[TTS] Safety timeout — forcing queue advance');
+          audio.pause();
+          audio.onended = null;
+          audio.onerror = null;
+          if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
+          audioRef.current = null;
+          playNextTTS();
+        }
+      }, 30_000);
+
       audio.onended = () => {
+        if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
         if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
         audioRef.current = null;
         playNextTTS();
@@ -82,6 +102,7 @@ export function useTTSQueue() {
 
       audio.onerror = (err) => {
         console.error('[TTS] Audio error:', err);
+        if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
         if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
         audioRef.current = null;
         playNextTTS();

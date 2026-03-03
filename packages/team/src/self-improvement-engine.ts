@@ -343,11 +343,15 @@ export class SelfImprovementEngine {
         : {},
       newGoals: Array.isArray(parsed.newGoals) ? parsed.newGoals : [],
       // Support both old "improvementTasks" and new "proactiveTasks" key
-      proactiveTasks: Array.isArray(parsed.proactiveTasks)
+      // Filter out items with missing/empty titles (LLM can return malformed entries)
+      proactiveTasks: (Array.isArray(parsed.proactiveTasks)
         ? parsed.proactiveTasks
         : Array.isArray(parsed.improvementTasks)
-          ? parsed.improvementTasks as Array<{ title: string; description: string }>
-          : [],
+          ? parsed.improvementTasks
+          : []
+      ).filter((t: Record<string, unknown>) =>
+        typeof t.title === 'string' && t.title.trim().length > 0
+      ) as Array<{ title: string; description: string }>,
     };
   }
 }

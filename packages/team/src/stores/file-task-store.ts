@@ -19,7 +19,10 @@ export class FileTaskStore implements ITaskStore {
 
   async create(input: Omit<Task, 'id'>): Promise<Task> {
     const tasks = await this.loadCache();
-    const task: Task = { ...input, id: randomUUID() };
+    const title = (typeof input.title === 'string' && input.title.trim())
+      ? input.title
+      : 'Untitled task';
+    const task: Task = { ...input, title, id: randomUUID() };
     tasks.set(task.id, task);
     this.scheduleFlush();
     return task;

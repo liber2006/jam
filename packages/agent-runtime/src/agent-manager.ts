@@ -769,6 +769,16 @@ export class AgentManager {
     const page = merged.slice(-limit);
     const hasMore = anyHasMore || merged.length > limit;
 
+    // Truncate content for IPC transfer — full 100KB+ agent responses freeze the renderer.
+    // Full content is still on disk; thread/detail views can load per-agent.
+    // 8000 chars covers most messages without truncation; at 20 msgs/page = 160KB max.
+    const MAX_CONTENT_CHARS = 8000;
+    for (const msg of page) {
+      if (msg.content && msg.content.length > MAX_CONTENT_CHARS) {
+        msg.content = msg.content.slice(0, MAX_CONTENT_CHARS) + '\n\n…(truncated)';
+      }
+    }
+
     return { messages: page, hasMore };
   }
 

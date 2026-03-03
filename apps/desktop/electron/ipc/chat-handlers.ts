@@ -103,6 +103,10 @@ export function registerChatHandlers(
   });
 
   ipcMain.handle('chat:loadHistory', async (_, options?: { agentId?: string; before?: string; limit?: number }) => {
-    return agentManager.loadConversationHistory(options);
+    const t0 = Date.now();
+    const result = await agentManager.loadConversationHistory(options);
+    const totalChars = result.messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0);
+    log.info(`loadHistory: ${result.messages.length} messages (${totalChars} chars) in ${Date.now() - t0}ms`);
+    return result;
   });
 }

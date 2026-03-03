@@ -150,6 +150,12 @@ export function useVoice() {
     analyser.fftSize = 1024;
     source.connect(analyser);
 
+    audioContext.onstatechange = () => {
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
+    };
+
     streamRef.current = stream;
     audioContextRef.current = audioContext;
     analyserRef.current = analyser;
@@ -260,6 +266,26 @@ export function useVoice() {
       minRecordingMsRef.current = settings.minRecordingMs;
     }).catch(() => {});
   }, []);
+
+  // Recover from system sleep — AudioContext becomes suspended after wake
+  useEffect(() => {
+    const handleSystemResume = () => {
+      const ctx = audioContextRef.current;
+      if (!ctx) return;
+
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {
+          releaseMicStream();
+          if (isListening) {
+            setTimeout(() => startListening(), 1000);
+          }
+        });
+      }
+    };
+
+    window.addEventListener('jam:system-resumed', handleSystemResume);
+    return () => window.removeEventListener('jam:system-resumed', handleSystemResume);
+  }, [isListening, releaseMicStream, startListening]);
 
   // Cleanup on unmount or agent change
   useEffect(() => {

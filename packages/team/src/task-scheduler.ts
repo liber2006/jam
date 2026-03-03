@@ -80,13 +80,18 @@ export class TaskScheduler {
   /** Set to true once AGENTS_READY fires — ticks are skipped until then */
   private agentsReady = false;
   private readonly unsubscribers: Array<() => void> = [];
+  /** Grace period after AGENTS_READY before dispatching — lets the renderer stabilize */
+  private readonly startupGraceMs: number;
 
   constructor(
     private readonly taskStore: ITaskStore,
     private readonly eventBus: IEventBus,
     private readonly scheduleStore?: FileScheduleStore,
     private readonly checkIntervalMs: number = 60_000,
-  ) {}
+    startupGraceMs?: number,
+  ) {
+    this.startupGraceMs = startupGraceMs ?? 60_000;
+  }
 
   /** Register a handler for system schedules with a matching tag.
    *  When a schedule fires and its task template has a matching tag,
@@ -124,12 +129,16 @@ export class TaskScheduler {
     // Start ticking, but skip dispatch until agents are ready
     this.timer.cancelAndSet(() => this.tick(), this.checkIntervalMs);
 
-    // Listen for agents to be ready before dispatching scheduled tasks
+    // Listen for agents to be ready before dispatching scheduled tasks.
+    // Delay the first tick by a grace period so the renderer can stabilize
+    // before heavy background work (reflection, code review) fires.
     this.unsubscribers.push(
       this.eventBus.on(Events.AGENTS_READY, () => {
-        this.agentsReady = true;
-        log.info('Agents ready — scheduler will begin dispatching tasks');
-        this.tick();
+        log.info(`Agents ready — scheduler will begin dispatching tasks in ${this.startupGraceMs / 1000}s`);
+        setTimeout(() => {
+          this.agentsReady = true;
+          this.tick();
+        }, this.startupGraceMs);
       }),
     );
   }

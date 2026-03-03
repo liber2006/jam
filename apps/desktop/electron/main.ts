@@ -6,11 +6,12 @@ import {
   Menu,
   nativeImage,
   net,
+  powerMonitor,
   protocol,
   systemPreferences,
 } from 'electron';
 import path from 'node:path';
-import { createLogger, addLogTransport, Batcher, type LogEntry } from '@jam/core';
+import { createLogger, addLogTransport, Batcher, TimeoutTimer, type LogEntry } from '@jam/core';
 import { Orchestrator } from './orchestrator';
 import { CommandRouter } from './command-router';
 import { fixPath } from './utils/path-fix';
@@ -154,6 +155,13 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  mainWindow.webContents.on('unresponsive', () => {
+    log.warn('Renderer became unresponsive');
+  });
+  mainWindow.webContents.on('responsive', () => {
+    log.info('Renderer became responsive again');
   });
 }
 
@@ -315,6 +323,45 @@ app.whenReady().then(() => {
   }
 
   orchestrator.startAutoStartAgents();
+
+  // --- System suspend/resume handling ---
+  // Prevent false health-check failures and stale renderer state after sleep/lock.
+  // Uses a shared TimeoutTimer so rapid suspend/resume cycles don't stack restarts.
+  const healthResumeTimer = new TimeoutTimer();
+
+  powerMonitor.on('suspend', () => {
+    log.info('System suspending — pausing health check');
+    healthResumeTimer.cancel();
+    orchestrator.agentManager.stopHealthCheck();
+    orchestrator.serviceRegistry.stopHealthMonitor();
+  });
+  powerMonitor.on('lock-screen', () => {
+    log.info('Screen locked — pausing health check');
+    healthResumeTimer.cancel();
+    orchestrator.agentManager.stopHealthCheck();
+    orchestrator.serviceRegistry.stopHealthMonitor();
+  });
+  powerMonitor.on('resume', () => {
+    log.info('System resumed — restarting health checks after grace period');
+    healthResumeTimer.cancelAndSet(() => {
+      orchestrator.agentManager.startHealthCheck();
+      orchestrator.serviceRegistry.startHealthMonitor();
+    }, 5000);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('system:resumed');
+    }
+  });
+  powerMonitor.on('unlock-screen', () => {
+    log.info('Screen unlocked — restarting health checks after grace period');
+    healthResumeTimer.cancelAndSet(() => {
+      orchestrator.agentManager.startHealthCheck();
+      orchestrator.serviceRegistry.startHealthMonitor();
+    }, 5000);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('system:resumed');
+    }
+  });
+
   log.info('App started successfully');
 });
 

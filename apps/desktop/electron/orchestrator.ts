@@ -37,7 +37,7 @@ import {
   OpenAITTSProvider,
 } from '@jam/voice';
 import type { ISTTProvider, ITTSProvider, AgentState, IMemoryStore } from '@jam/core';
-import { createLogger, JAM_SYSTEM_PROFILE, Batcher, Events } from '@jam/core';
+import { createLogger, JAM_SYSTEM_PROFILE, Batcher, Events, TimeoutTimer } from '@jam/core';
 import { FileMemoryStore } from '@jam/memory';
 import { BrainClient, BrainMemoryStore } from '@jam/brain';
 import {
@@ -122,8 +122,15 @@ export class Orchestrator {
   readonly taskExecutor: TaskExecutor;
   /** IPC batchers — stored for disposal during shutdown */
   private readonly batchers: Array<{ dispose(): void }> = [];
+  private windowEventCleanups: Array<() => void> = [];
 
   private mainWindow: BrowserWindow | null = null;
+
+  // ── IPC Diagnostics ──────────────────────────────────────────────
+  private ipcMessageCounts = new Map<string, number>();
+  private ipcDiagnosticsTimer: ReturnType<typeof setInterval> | null = null;
+  private eventLoopLagTimer: ReturnType<typeof setInterval> | null = null;
+  private lastEventLoopCheck = 0;
 
   constructor() {
     this.config = loadConfig();
@@ -426,12 +433,12 @@ export class Orchestrator {
 
     // Register system schedule handlers
     this.taskScheduler.registerSystemHandler('self-improvement', async () => {
-      const agents = this.agentManager.list();
+      const agents = this.agentManager.list().filter(a => a.status === 'running');
       if (agents.length === 0) return;
 
       // Run reflections sequentially — parallel execution spawns N child
       // processes simultaneously which can OOM the main process.
-      log.info(`Scheduled self-reflection for ${agents.length} agent(s) (sequential)`);
+      log.info(`Scheduled self-reflection for ${agents.length} running agent(s) (sequential)`);
       for (const a of agents) {
         try {
           const result = await this.selfImprovement.triggerReflection(a.profile.id);
@@ -474,7 +481,7 @@ export class Orchestrator {
       this.relationshipStore,
       this.taskStore,
       this.taskAssigner,
-      () => this.agentManager.list().map((a) => a.profile),
+      () => this.agentManager.list().filter((a) => a.status === 'running').map((a) => a.profile),
       this.communicationHub,
     );
 
@@ -483,7 +490,10 @@ export class Orchestrator {
       eventBus: this.eventBus,
       executeOnAgent: (agentId, prompt) =>
         this.agentManager.executeDetached(agentId, prompt),
-      isAgentAvailable: (agentId) => !!this.agentManager.get(agentId),
+      isAgentAvailable: (agentId) => {
+        const agent = this.agentManager.get(agentId);
+        return !!agent && agent.status === 'running';
+      },
       abortAgent: (agentId) => this.agentManager.abortTask(agentId),
     });
 
@@ -577,13 +587,60 @@ export class Orchestrator {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       try {
         this.mainWindow.webContents.send(channel, data);
+        // Track IPC message counts for diagnostics
+        this.ipcMessageCounts.set(channel, (this.ipcMessageCounts.get(channel) ?? 0) + 1);
       } catch {
         // Window may have been destroyed between check and send (race during HMR)
       }
     }
   }
 
+  /** Start IPC + event loop diagnostics (call after startup) */
+  startIPCDiagnostics(): void {
+    // IPC message rate — log every 5s
+    this.ipcDiagnosticsTimer = setInterval(() => {
+      if (this.ipcMessageCounts.size === 0) return;
+      const lines: string[] = [];
+      let total = 0;
+      for (const [channel, count] of this.ipcMessageCounts) {
+        lines.push(`  ${channel}: ${count} msgs (${(count / 5).toFixed(1)}/s)`);
+        total += count;
+      }
+      log.info(`[IPC Diagnostics] ${total} messages in 5s (${(total / 5).toFixed(1)}/s)\n${lines.join('\n')}`);
+      this.ipcMessageCounts.clear();
+    }, 5000);
+
+    // Event loop lag detector — fires every 500ms, logs if blocked >100ms
+    this.lastEventLoopCheck = Date.now();
+    this.eventLoopLagTimer = setInterval(() => {
+      const now = Date.now();
+      const expected = 500;
+      const actual = now - this.lastEventLoopCheck;
+      const lag = actual - expected;
+      if (lag > 100) {
+        log.warn(`[Event Loop Lag] Main process blocked for ${lag}ms (expected ${expected}ms, actual ${actual}ms)`);
+      }
+      this.lastEventLoopCheck = now;
+    }, 500);
+  }
+
+  /** Stop IPC + event loop diagnostics */
+  stopIPCDiagnostics(): void {
+    if (this.ipcDiagnosticsTimer) {
+      clearInterval(this.ipcDiagnosticsTimer);
+      this.ipcDiagnosticsTimer = null;
+    }
+    if (this.eventLoopLagTimer) {
+      clearInterval(this.eventLoopLagTimer);
+      this.eventLoopLagTimer = null;
+    }
+  }
+
   setMainWindow(win: BrowserWindow): void {
+    // Clean up previous event listeners (prevents accumulation during HMR)
+    for (const cleanup of this.windowEventCleanups) cleanup();
+    this.windowEventCleanups = [];
+
     this.mainWindow = win;
 
     // Send initial sandbox status so the renderer knows if it should show a loading screen
@@ -602,43 +659,47 @@ export class Orchestrator {
       }
     }
 
-    // Forward events to renderer
-    this.eventBus.on('agent:statusChanged', (data: {
-      agentId: string;
-      status: string;
-      previousStatus: string;
-    }) => {
-      this.sendToRenderer('agents:statusChange', data);
+    // Forward events to renderer (capture cleanups to prevent listener accumulation)
+    const on = <T>(event: string, handler: (payload: T) => void) => {
+      this.windowEventCleanups.push(this.eventBus.on(event, handler));
+    };
 
-      // Agent died unexpectedly — notify with a funny voice message
-      if (data.status === 'error') {
-        this.speakAgentDeath(data.agentId);
-      }
-    });
+    on<{ agentId: string; status: string; previousStatus: string }>(
+      'agent:statusChanged', (data) => {
+        this.sendToRenderer('agents:statusChange', data);
 
-    this.eventBus.on('agent:created', (data: { agentId: string; profile: { cwd?: string } }) => {
-      this.sendToRenderer('agents:created', data);
-      this.syncAgentNames();
-      // Watch new agent's inbox + refresh team skill roster
-      if (data.profile.cwd) {
-        this.inboxWatcher.watchAgent(data.agentId, data.profile.cwd);
-      }
-      this.refreshTeamSkill();
-    });
+        // Agent died unexpectedly — notify with a funny voice message
+        if (data.status === 'error') {
+          this.speakAgentDeath(data.agentId);
+        }
+      },
+    );
 
-    this.eventBus.on('agent:deleted', (data: { agentId: string }) => {
+    on<{ agentId: string; profile: { cwd?: string } }>(
+      'agent:created', (data) => {
+        this.sendToRenderer('agents:created', data);
+        this.syncAgentNames();
+        // Watch new agent's inbox + refresh team skill roster
+        if (data.profile.cwd) {
+          this.inboxWatcher.watchAgent(data.agentId, data.profile.cwd);
+        }
+        this.refreshTeamSkill();
+      },
+    );
+
+    on<{ agentId: string }>('agent:deleted', (data) => {
       this.sendToRenderer('agents:deleted', data);
       this.syncAgentNames();
       this.inboxWatcher.unwatchAgent(data.agentId);
       this.refreshTeamSkill();
     });
 
-    this.eventBus.on('agent:updated', (data) => {
+    on('agent:updated', (data) => {
       this.sendToRenderer('agents:updated', data);
       this.syncAgentNames();
     });
 
-    this.eventBus.on('agent:visualStateChanged', (data) => {
+    on('agent:visualStateChanged', (data) => {
       this.sendToRenderer('agents:visualStateChange', data);
     });
 
@@ -655,7 +716,7 @@ export class Orchestrator {
     );
     this.batchers.push(termBatcher);
 
-    this.eventBus.on('agent:output', (data: { agentId: string; data: string }) => {
+    on<{ agentId: string; data: string }>('agent:output', (data) => {
       termBatcher.add(data.agentId, data.data);
     });
 
@@ -681,26 +742,26 @@ export class Orchestrator {
     );
     this.batchers.push(execBatcher);
 
-    this.eventBus.on('agent:executeOutput', (data: { agentId: string; data: string; clear?: boolean }) => {
+    on<{ agentId: string; data: string; clear?: boolean }>('agent:executeOutput', (data) => {
       execBatcher.add(data.agentId, { chunks: [data.data], clear: !!data.clear });
     });
 
-    this.eventBus.on('voice:transcription', (data) => {
+    on('voice:transcription', (data) => {
       this.sendToRenderer('voice:transcription', data);
     });
 
-    this.eventBus.on('voice:stateChanged', (data) => {
+    on('voice:stateChanged', (data) => {
       this.sendToRenderer('voice:stateChanged', data);
     });
 
     // Agent acknowledged — immediate feedback before execute() starts
-    this.eventBus.on('agent:acknowledged', (data: {
+    on<{
       agentId: string;
       agentName: string;
       agentRuntime: string;
       agentColor: string;
       ackText: string;
-    }) => {
+    }>('agent:acknowledged', (data) => {
       // Forward to renderer for chat UI
       this.sendToRenderer('chat:agentAcknowledged', data);
 
@@ -709,14 +770,14 @@ export class Orchestrator {
     });
 
     // Progress updates during long-running execution — show in chat + speak via TTS
-    this.eventBus.on('agent:progress', (data: {
+    on<{
       agentId: string;
       agentName: string;
       agentRuntime: string;
       agentColor: string;
       type: string;
       summary: string;
-    }) => {
+    }>('agent:progress', (data) => {
       // Show progress in chat UI as a system-ish agent message
       this.sendToRenderer('chat:agentProgress', data);
 
@@ -725,7 +786,7 @@ export class Orchestrator {
     });
 
     // Agent errors — surface to UI so users see what went wrong
-    this.eventBus.on('agent:error', (data: { agentId: string; message: string; details?: string }) => {
+    on<{ agentId: string; message: string; details?: string }>('agent:error', (data) => {
       this.sendToRenderer('app:error', {
         message: data.message,
         details: data.details,
@@ -733,41 +794,27 @@ export class Orchestrator {
     });
 
     // TTS: when AgentManager detects a complete response, synthesize and send audio
-    this.eventBus.on('agent:responseComplete', (data: { agentId: string; text: string }) => {
+    on<{ agentId: string; text: string }>('agent:responseComplete', (data) => {
       this.handleResponseComplete(data.agentId, data.text);
     });
 
     // Team events → renderer
-    this.eventBus.on('task:created', (data) => {
-      this.sendToRenderer('tasks:created', data);
-    });
-    this.eventBus.on('task:updated', (data) => {
-      this.sendToRenderer('tasks:updated', data);
-    });
-    this.eventBus.on('task:completed', (data) => {
-      this.sendToRenderer('tasks:completed', data);
-    });
-    this.eventBus.on('stats:updated', (data) => {
-      this.sendToRenderer('stats:updated', data);
-    });
-    this.eventBus.on('soul:evolved', (data) => {
-      this.sendToRenderer('soul:evolved', data);
-    });
-    this.eventBus.on('message:received', (data) => {
-      this.sendToRenderer('message:received', data);
-    });
-    this.eventBus.on('trust:updated', (data) => {
-      this.sendToRenderer('trust:updated', data);
-    });
+    on('task:created', (data) => { this.sendToRenderer('tasks:created', data); });
+    on('task:updated', (data) => { this.sendToRenderer('tasks:updated', data); });
+    on('task:completed', (data) => { this.sendToRenderer('tasks:completed', data); });
+    on('stats:updated', (data) => { this.sendToRenderer('stats:updated', data); });
+    on('soul:evolved', (data) => { this.sendToRenderer('soul:evolved', data); });
+    on('message:received', (data) => { this.sendToRenderer('message:received', data); });
+    on('trust:updated', (data) => { this.sendToRenderer('trust:updated', data); });
 
     // Task execution results → quiet system notification (no voice, no full chat message)
-    this.eventBus.on('task:resultReady', (data: {
+    on<{
       taskId: string;
       agentId: string;
       title: string;
       text: string;
       success: boolean;
-    }) => {
+    }>('task:resultReady', (data) => {
       this.sendToRenderer('chat:systemNotification', {
         taskId: data.taskId,
         agentId: data.agentId,
@@ -780,18 +827,10 @@ export class Orchestrator {
     });
 
     // Code improvement events
-    this.eventBus.on('code:proposed', (data) => {
-      this.sendToRenderer('code:proposed', data);
-    });
-    this.eventBus.on('code:improved', (data) => {
-      this.sendToRenderer('code:improved', data);
-    });
-    this.eventBus.on('code:failed', (data) => {
-      this.sendToRenderer('code:failed', data);
-    });
-    this.eventBus.on('code:rolledback', (data) => {
-      this.sendToRenderer('code:rolledback', data);
-    });
+    on('code:proposed', (data) => { this.sendToRenderer('code:proposed', data); });
+    on('code:improved', (data) => { this.sendToRenderer('code:improved', data); });
+    on('code:failed', (data) => { this.sendToRenderer('code:failed', data); });
+    on('code:rolledback', (data) => { this.sendToRenderer('code:rolledback', data); });
   }
 
   initVoice(): void {
@@ -1018,14 +1057,20 @@ export class Orchestrator {
   }
 
   async startAutoStartAgents(): Promise<void> {
+    const t0 = Date.now();
+    const phase = (name: string) => log.info(`[Startup Timing] ${name} at +${Date.now() - t0}ms`);
+
     // Wait for Docker image to be ready before launching any containers
     await this.imageReady;
+    phase('imageReady');
 
     // Import agent folders from disk that aren't registered yet (e.g. created by JAM)
     await this.bootstrapDiskAgents();
+    phase('bootstrapDiskAgents');
 
     // Clean up any LaunchAgent plists agents may have installed
     await this.cleanupAgentLaunchAgents();
+    phase('cleanupLaunchAgents');
 
     const agents = this.agentManager.list();
     const autoStartAgents = agents.filter((a) => a.profile.autoStart);
@@ -1038,15 +1083,18 @@ export class Orchestrator {
     }
 
     for (const agent of autoStartAgents) {
+      const agentT0 = Date.now();
       log.info(`Auto-starting agent: ${agent.profile.name}`, undefined, agent.profile.id);
       this.sendToRenderer('sandbox:progress', {
         status: 'starting-containers',
         message: `Starting ${agent.profile.name}...`,
       });
       await this.agentManager.start(agent.profile.id);
+      phase(`agent "${agent.profile.name}" started (${Date.now() - agentT0}ms)`);
     }
 
-    // Signal sandbox is fully ready
+    // Signal sandbox is fully ready — renderer unmounts loading overlay and cold-mounts
+    // the entire UI. Defer ALL heavy background work so the renderer can settle first.
     this.sandboxFullyReady = true;
     if (this.containerManager) {
       this.sendToRenderer('sandbox:progress', {
@@ -1054,13 +1102,21 @@ export class Orchestrator {
         message: 'All agent containers running',
       });
     }
+    phase('sandbox:ready sent');
 
-    // Initial scan: find background services from previous sessions.
-    // Any service still listening from a prior run is an orphan — kill it.
-    await this.cleanupOrphanServices();
-    this.serviceRegistry.startHealthMonitor();
+    // Start IPC + event loop diagnostics immediately so we catch the freeze
+    this.startIPCDiagnostics();
+    phase('IPC diagnostics started');
 
-    this.eventBus.startDiagnostics(10_000);
+    // Wait for the renderer's initial mount to complete before starting background work.
+    // Without this, service scanning (recursive FS + TCP port checks with 2s timeouts),
+    // health monitors, and task draining all compete with the renderer's initial
+    // agents:list + loadHistory IPC requests, causing a 10s freeze.
+    const RENDERER_SETTLE_MS = 3000;
+    log.info(`Deferring background services by ${RENDERER_SETTLE_MS / 1000}s to let renderer settle`);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, RENDERER_SETTLE_MS));
+    phase('renderer settle complete');
 
     // Start team services — must subscribe to AGENTS_READY before we emit it
     this.teamEventHandler.start();
@@ -1071,10 +1127,27 @@ export class Orchestrator {
         this.inboxWatcher.watchAgent(agent.profile.id, agent.profile.cwd);
       }
     }
-    log.info('Team services started');
+    phase('team services started');
 
     // Signal that all agents are running — triggers task drain and schedule activation
     this.eventBus.emit(Events.AGENTS_READY, { agentCount: autoStartAgents.length });
+
+    this.eventBus.startDiagnostics(10_000);
+
+    // Orphan service cleanup runs AFTER everything else — its recursive filesystem
+    // scanning + TCP port checks (2s timeout each) can block the event loop for seconds.
+    const cleanupT0 = Date.now();
+    this.cleanupOrphanServices().then(() => {
+      phase(`orphan cleanup done (${Date.now() - cleanupT0}ms)`);
+      this.serviceRegistry.startHealthMonitor();
+      phase('health monitor started');
+    }).catch((err) => {
+      log.warn(`Deferred cleanup failed: ${String(err)}`);
+      // Start health monitor anyway — it will discover services on its own
+      this.serviceRegistry.startHealthMonitor();
+    });
+
+    phase('startAutoStartAgents complete (background tasks still running)');
   }
 
   /**
@@ -1175,6 +1248,7 @@ export class Orchestrator {
    */
   async shutdown(keepContainers = false): Promise<void> {
     // --- Phase 1: Synchronous stops (instant, no I/O) ---
+    this.stopIPCDiagnostics();
     this.eventBus.stopDiagnostics();
     this.taskExecutor.stop();
     this.teamEventHandler.stop();

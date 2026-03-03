@@ -3,7 +3,7 @@ import { useAppStore } from '@/store';
 import { ChatView } from '@/components/chat/ChatView';
 import type { ChatMessage } from '@/store/chatSlice';
 
-const HISTORY_PAGE_SIZE = 50;
+const HISTORY_PAGE_SIZE = 20;
 
 export const ChatContainer: React.FC = () => {
   // Subscribe to the ID list (changes only on add/delete/prepend) and the map

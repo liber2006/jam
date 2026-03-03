@@ -49,9 +49,13 @@ export function registerAgentHandlers(deps: AgentHandlerDeps): void {
   ipcMain.handle('agents:delete', (_, agentId) =>
     agentManager.delete(agentId),
   );
-  ipcMain.handle('agents:list', () =>
-    agentManager.list(),
-  );
+  ipcMain.handle('agents:list', () => {
+    const t0 = Date.now();
+    const result = agentManager.list();
+    const ms = Date.now() - t0;
+    if (ms > 10) console.log(`[AgentHandlers] agents:list took ${ms}ms (${result.length} agents)`);
+    return result;
+  });
   ipcMain.handle('agents:get', (_, agentId) =>
     agentManager.get(agentId) ?? null,
   );

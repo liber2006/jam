@@ -1,5 +1,4 @@
-import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, readdir, writeFile, access } from 'node:fs/promises';
 import { execFile, spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { createLogger, IntervalTimer, TimeoutTimer } from '@jam/core';
@@ -254,7 +253,7 @@ export class ServiceRegistry {
   private async findServiceFiles(dir: string, depth: number): Promise<string[]> {
     const results: string[] = [];
     const filePath = join(dir, SERVICES_FILE);
-    if (existsSync(filePath)) results.push(filePath);
+    try { await access(filePath); results.push(filePath); } catch { /* not found */ }
     if (depth >= MAX_SCAN_DEPTH) return results;
 
     try {

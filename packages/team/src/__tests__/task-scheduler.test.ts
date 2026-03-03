@@ -45,7 +45,7 @@ describe('TaskScheduler', () => {
 
   describe('AGENTS_READY event-driven activation', () => {
     it('should NOT dispatch tasks before AGENTS_READY fires', async () => {
-      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000);
+      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000, 0);
       // Register a due interval schedule
       scheduler.register(
         { intervalMs: 500 },
@@ -68,7 +68,7 @@ describe('TaskScheduler', () => {
     });
 
     it('should dispatch tasks after AGENTS_READY fires', async () => {
-      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000);
+      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000, 0);
       scheduler.register(
         { intervalMs: 500 },
         {
@@ -91,7 +91,7 @@ describe('TaskScheduler', () => {
     });
 
     it('should start dispatching on regular ticks after AGENTS_READY', async () => {
-      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 2000);
+      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 2000, 0);
       scheduler.register(
         { intervalMs: 1000 },
         {
@@ -121,7 +121,7 @@ describe('TaskScheduler', () => {
 
   describe('stop()', () => {
     it('should unsubscribe all event listeners and stop ticking', async () => {
-      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000);
+      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000, 0);
       scheduler.register(
         { intervalMs: 500 },
         {
@@ -187,7 +187,7 @@ describe('TaskScheduler', () => {
 
   describe('system handlers', () => {
     it('should register a system handler', () => {
-      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000);
+      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000, 0);
 
       const handler = vi.fn().mockResolvedValue(undefined);
       scheduler.registerSystemHandler('self-improvement', handler);
@@ -204,7 +204,7 @@ describe('TaskScheduler', () => {
       const createdSpy = vi.fn();
       eventBus.on(Events.TASK_CREATED, createdSpy);
 
-      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000);
+      scheduler = new TaskScheduler(taskStore, eventBus, undefined, 1000, 0);
       scheduler.register(
         { intervalMs: 500 },
         {

@@ -134,7 +134,7 @@ export const TaskCard = React.memo(function TaskCard({ task, agentName, agentCol
       )}
 
       {/* Title */}
-      <div className="text-sm font-medium text-white mb-2 leading-snug pr-5">{task.title}</div>
+      <div className="text-sm font-medium text-white mb-2 leading-snug pr-5">{task.title || 'Untitled task'}</div>
 
       {/* Priority + status badges */}
       <div className="flex items-center gap-2 mb-2">
