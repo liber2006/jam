@@ -6,26 +6,38 @@ const log = createLogger('PortAllocator');
 /**
  * Allocates host port ranges for Docker containers.
  * Each agent gets a block of ports mapped to a fixed container port range (3000+).
+ *
+ * Robust against reclaim/release gaps: always checks for overlaps before allocating.
  */
 export class PortAllocator implements IPortAllocator {
   private allocations = new Map<string, { hostStart: number; containerStart: number; count: number }>();
-  private nextSlot = 0;
 
   constructor(
     private readonly basePort: number = 10_000,
-    private readonly portsPerAgent: number = 100,
+    private readonly portsPerAgent: number = 20,
     private readonly containerBasePort: number = 3000,
   ) {}
 
   /**
    * Allocate a port range for an agent.
-   * Returns the host port range start and the container port range start.
+   * Scans for the first non-overlapping slot to avoid conflicts with
+   * reclaimed allocations that may use different port counts.
    */
   allocate(agentId: string): { hostStart: number; containerStart: number; count: number } {
     const existing = this.allocations.get(agentId);
     if (existing) return existing;
 
-    const hostStart = this.basePort + this.nextSlot * this.portsPerAgent;
+    // Find the first slot whose range doesn't overlap any existing allocation
+    let slot = 0;
+    let hostStart: number;
+    const MAX_SLOTS = 100; // safety limit
+
+    do {
+      hostStart = this.basePort + slot * this.portsPerAgent;
+      if (!this.overlapsExisting(hostStart, this.portsPerAgent)) break;
+      slot++;
+    } while (slot < MAX_SLOTS);
+
     const allocation = {
       hostStart,
       containerStart: this.containerBasePort,
@@ -33,15 +45,25 @@ export class PortAllocator implements IPortAllocator {
     };
 
     this.allocations.set(agentId, allocation);
-    this.nextSlot++;
 
     log.info(
       `Allocated ports ${hostStart}-${hostStart + this.portsPerAgent - 1} ` +
         `→ container ${this.containerBasePort}-${this.containerBasePort + this.portsPerAgent - 1} ` +
-        `for agent ${agentId}`,
+        `for agent ${agentId} (slot ${slot})`,
     );
 
     return allocation;
+  }
+
+  /** Check if a candidate range [start, start+count) overlaps any existing allocation */
+  private overlapsExisting(start: number, count: number): boolean {
+    const end = start + count;
+    for (const alloc of this.allocations.values()) {
+      const allocEnd = alloc.hostStart + alloc.count;
+      // Two ranges overlap if one starts before the other ends
+      if (start < allocEnd && alloc.hostStart < end) return true;
+    }
+    return false;
   }
 
   /** Reclaim an allocation from an existing container's actual port mappings.
@@ -56,14 +78,10 @@ export class PortAllocator implements IPortAllocator {
     // Find the lowest container port and its host port
     let minContainer = Infinity;
     let minHost = Infinity;
-    let maxHost = -Infinity;
     for (const [containerPort, hostPort] of actualMappings) {
       if (containerPort < minContainer) {
         minContainer = containerPort;
         minHost = hostPort;
-      }
-      if (hostPort > maxHost) {
-        maxHost = hostPort;
       }
     }
 
@@ -74,14 +92,6 @@ export class PortAllocator implements IPortAllocator {
     };
 
     this.allocations.set(agentId, allocation);
-
-    // Advance nextSlot past the highest occupied host port to avoid overlap.
-    // Uses the highest host port + 1 (relative to basePort) divided by portsPerAgent,
-    // so the next slot starts cleanly after all reclaimed ranges.
-    const slotsNeeded = Math.ceil((maxHost + 1 - this.basePort) / this.portsPerAgent);
-    if (slotsNeeded > this.nextSlot) {
-      this.nextSlot = slotsNeeded;
-    }
 
     log.info(
       `Reclaimed ports ${allocation.hostStart}-${allocation.hostStart + allocation.count - 1} ` +

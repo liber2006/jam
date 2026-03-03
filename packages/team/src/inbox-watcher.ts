@@ -110,6 +110,9 @@ export class InboxWatcher {
       const lines = newContent.split('\n').filter((l) => l.trim());
 
       for (const line of lines) {
+        // Skip non-JSON lines — agents sometimes write plain text to inbox
+        if (!line.startsWith('{')) continue;
+
         try {
           const request = JSON.parse(line) as {
             type?: string;
@@ -172,7 +175,7 @@ export class InboxWatcher {
             success: true,
           });
         } catch (err) {
-          log.debug(`Skipping malformed inbox line: ${String(err)}`);
+          // Silently skip — malformed JSON in inbox is expected (agent text output)
         }
       }
 

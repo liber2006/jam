@@ -32,7 +32,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   memoryMb: 4096,
   pidsLimit: 256,
   portRangeStart: 10_000,
-  portsPerAgent: 100,
+  portsPerAgent: 20,
   imageName: 'jam-agent:latest',
   stopTimeoutSec: 10,
   hostBridgePort: 19_876,
