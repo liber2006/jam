@@ -48,9 +48,12 @@ export function registerSandboxHandlers(deps: SandboxHandlerDeps): void {
   // --- Desktop status ---
   ipcMain.handle('sandbox:desktopStatus', (_e, agentId: string): DesktopStatusResult => {
     if (!deps.desktopPortResolver || !deps.config.sandbox?.computerUse?.enabled) {
+      log.info(`desktopStatus(${agentId}): UNAVAILABLE — resolver=${!!deps.desktopPortResolver}, computerUse.enabled=${deps.config.sandbox?.computerUse?.enabled}`);
+
       return { available: false };
     }
     const noVncPort = deps.desktopPortResolver.getNoVncPort(agentId);
+    log.info(`desktopStatus(${agentId}): noVncPort=${noVncPort}`);
     return {
       available: !!noVncPort,
       noVncPort: noVncPort ?? undefined,

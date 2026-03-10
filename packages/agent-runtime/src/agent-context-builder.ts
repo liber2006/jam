@@ -20,6 +20,8 @@ export interface SkillDefinition {
   description: string;
   triggers: string[];
   body: string;
+  /** When true, skill is injected at PTY startup — no trigger match needed */
+  alwaysInject?: boolean;
 }
 
 const MAX_CONVERSATION_HISTORY = 20;
@@ -195,9 +197,10 @@ export class AgentContextBuilder {
     const agentNames = new Set(agentSkills.map(s => s.name));
     const merged = [...agentSkills, ...sharedSkills.filter(s => !agentNames.has(s.name))];
 
-    // Filter by trigger match
+    // Filter by trigger match — alwaysInject skills are included regardless
     const lowerCommand = commandText.toLowerCase();
     return merged.filter(skill =>
+      skill.alwaysInject ||
       skill.triggers.some(trigger => lowerCommand.includes(trigger.toLowerCase()))
     );
   }
@@ -255,6 +258,7 @@ export class AgentContextBuilder {
       description: meta.description || '',
       triggers: meta.triggers.split(',').map(t => t.trim()).filter(Boolean),
       body: body.trim(),
+      alwaysInject: meta.alwaysInject === 'true',
     };
   }
 

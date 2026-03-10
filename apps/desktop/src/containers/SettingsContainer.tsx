@@ -118,13 +118,21 @@ export const SettingsContainer: React.FC<{
 
   useEffect(() => {
     window.jam.config.get().then((c) => {
-      const loaded = c as unknown as Partial<Config>;
+      const loaded = c as unknown as Partial<Config> & { sandbox?: Record<string, unknown> };
+      // Map nested computerUse back to flat keys for UI
+      const sandboxLoaded = loaded.sandbox ?? {};
+      const computerUse = sandboxLoaded.computerUse as { enabled?: boolean; resolution?: string } | undefined;
+      const dockerSettings: Partial<SandboxDockerSettings> = {
+        containerExitBehavior: sandboxLoaded.containerExitBehavior as ContainerExitBehavior | undefined,
+        computerUseEnabled: computerUse?.enabled ?? (sandboxLoaded.computerUseEnabled as boolean | undefined) ?? false,
+        computerUseResolution: computerUse?.resolution ?? (sandboxLoaded.computerUseResolution as string | undefined) ?? '1920x1080',
+      };
       setConfig((prev) => ({
         ...prev,
         ...loaded,
         osSandbox: { ...prev.osSandbox, ...(loaded.osSandbox as Partial<OsSandboxSettings> | undefined) },
         worktree: { ...prev.worktree, ...(loaded.worktree as Partial<WorktreeSettings> | undefined) },
-        sandbox: { ...prev.sandbox, ...(loaded.sandbox as Partial<SandboxDockerSettings> | undefined) },
+        sandbox: { ...prev.sandbox, ...dockerSettings },
         brain: { ...prev.brain, ...(loaded.brain as Partial<BrainConfig> | undefined) },
       }));
       if (Array.isArray(loaded.noiseBlocklist)) {
@@ -176,8 +184,18 @@ export const SettingsContainer: React.FC<{
         setBrainKey('');
       }
 
+      // Translate flat UI keys into nested structure the backend expects
+      const { computerUseEnabled, computerUseResolution, ...restSandbox } = config.sandbox as SandboxDockerSettings & Record<string, unknown>;
       const configToSave = {
         ...config,
+        sandbox: {
+          ...restSandbox,
+          computerUse: {
+            enabled: computerUseEnabled ?? false,
+            resolution: computerUseResolution ?? '1920x1080',
+            noVncEnabled: true,
+          },
+        },
         noiseBlocklist: blocklistText
           .split('\n')
           .map((s) => s.trim())

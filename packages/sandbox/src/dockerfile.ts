@@ -57,6 +57,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
   xterm \\
   dbus-x11 \\
   x11-utils \\
+  x11-xserver-utils \\
+  feh \\
   && rm -rf /var/lib/apt/lists/*
 
 # noVNC (web-based VNC viewer for dashboard)
@@ -64,14 +66,16 @@ RUN git clone --depth 1 https://github.com/novnc/noVNC /opt/noVNC && \\
   git clone --depth 1 https://github.com/novnc/websockify /opt/noVNC/utils/websockify && \\
   ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html
 
-# Chromium (for Playwright browser automation)
-RUN apt-get update && apt-get install -y --no-install-recommends \\
-  chromium-browser \\
-  && rm -rf /var/lib/apt/lists/*
-
 # Computer-use server (copied from build context by ImageManager)
 COPY computer-use/ /opt/computer-use/
 RUN cd /opt/computer-use && npm install --production 2>/dev/null || true
+
+# Playwright + its bundled Chromium (Ubuntu 24.04 snap chromium doesn't work in Docker)
+# Shared browser path so both root (build) and agent (runtime) can find it
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN cd /opt/computer-use && npm install playwright \\
+  && npx playwright install chromium --with-deps \\
+  && chmod -R o+rx /opt/pw-browsers
 
 # Desktop startup script (copied from build context by ImageManager)
 COPY start-desktop.sh /usr/local/bin/start-desktop.sh
@@ -103,6 +107,9 @@ RESOLUTION="\${SCREEN_RESOLUTION:-1920x1080}"
 DISPLAY_NUM="\${DISPLAY:-:99}"
 COMPUTER_USE_PORT="\${COMPUTER_USE_PORT:-3100}"
 
+# Fix named volume ownership (Docker creates them as root)
+sudo chown -R agent:agent /home/agent/.cache /home/agent/.local /home/agent/.config 2>/dev/null || true
+
 echo "[desktop] Starting virtual desktop at \${RESOLUTION} on display \${DISPLAY_NUM}"
 
 # Start virtual framebuffer
@@ -119,11 +126,26 @@ for i in $(seq 1 30); do
   sleep 0.2
 done
 
-# Window manager
+# Configure fluxbox to use feh for wallpaper (fbsetbg auto-detects it)
+mkdir -p ~/.fluxbox
+echo "feh" > ~/.fluxbox/lastwallpaper 2>/dev/null || true
+
+# Start window manager
 fluxbox &
+sleep 0.5
+
+# Set wallpaper with feh (the Ubuntu/fluxbox wallpaper, or solid color as fallback)
+if [ -f /usr/share/images/fluxbox/ubuntu-light.png ]; then
+  feh --bg-scale /usr/share/images/fluxbox/ubuntu-light.png 2>/dev/null || xsetroot -solid "#1a1a2e" 2>/dev/null || true
+else
+  xsetroot -solid "#1a1a2e" 2>/dev/null || true
+fi
+
+# Dismiss any stale dialogs
+wmctrl -c xmessage 2>/dev/null || true
 
 # VNC server (no password — container-internal only)
-x11vnc -display \${DISPLAY_NUM} -nopw -listen 0.0.0.0 -port 5900 -shared -forever -noxdamage &
+x11vnc -display \${DISPLAY_NUM} -nopw -listen 0.0.0.0 -rfbport 5900 -shared -forever -noxdamage &
 
 # noVNC web client
 /opt/noVNC/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
@@ -134,7 +156,7 @@ npx tsx src/cli.ts --port \${COMPUTER_USE_PORT} --display \${DISPLAY_NUM} &
 CU_PID=$!
 
 for i in $(seq 1 30); do
-  if curl -sf http://localhost:\${COMPUTER_USE_PORT}/status >/dev/null 2>&1; then
+  if curl -sf http://127.0.0.1:\${COMPUTER_USE_PORT}/status >/dev/null 2>&1; then
     echo "[desktop] Computer-use server ready on port \${COMPUTER_USE_PORT}"
     break
   fi

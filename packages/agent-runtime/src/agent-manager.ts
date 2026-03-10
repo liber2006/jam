@@ -243,7 +243,10 @@ export class AgentManager {
       }
     }
 
-    const spawnConfig = runtime.buildSpawnConfig(state.profile);
+    // Enrich profile with SOUL.md and always-on skills (e.g., computer-use) before spawning PTY
+    const enrichedProfile = await this.contextBuilder.buildContext(state.profile, '');
+
+    const spawnConfig = runtime.buildSpawnConfig(enrichedProfile);
     log.info(
       `Starting agent "${state.profile.name}": ${spawnConfig.command} ${spawnConfig.args.join(' ')}`,
       { cwd: state.profile.cwd },

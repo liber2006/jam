@@ -70,13 +70,12 @@ export function AgentDesktopViewer({ noVncUrl, agentName, isRunning }: AgentDesk
         </div>
       </div>
 
-      {/* noVNC iframe */}
+      {/* noVNC viewer — webview gives proper WebSocket + process isolation in Electron */}
       <div className="flex-1 bg-black">
-        <iframe
+        <webview
           src={vncSrc}
           className="w-full h-full border-0"
-          title={`${agentName} Desktop`}
-          allow="clipboard-read; clipboard-write"
+          allowpopups={false}
         />
       </div>
     </div>

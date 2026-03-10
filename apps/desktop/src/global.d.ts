@@ -500,8 +500,26 @@ export interface JamAPI {
   };
 }
 
+/** Electron <webview> element — extends HTMLElement with Electron-specific attributes */
+interface HTMLWebViewElement extends HTMLElement {
+  src: string;
+  allowpopups: string;
+  partition: string;
+}
+
 declare global {
   interface Window {
     jam: JamAPI;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLWebViewElement>, HTMLWebViewElement> & {
+        src?: string;
+        allowpopups?: string;
+        partition?: string;
+      };
+    }
   }
 }

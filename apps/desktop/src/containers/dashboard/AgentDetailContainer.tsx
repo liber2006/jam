@@ -26,6 +26,20 @@ export function AgentDetailContainer({ agentId }: AgentDetailContainerProps) {
   const { stats, relationships } = useTeamStats();
   const { tasks } = useTasks();
   const [services, setServices] = useState<ServiceEntry[]>([]);
+  const [noVncUrl, setNoVncUrl] = useState<string | null>(null);
+
+  // Fetch desktop status (noVNC URL) for computer-use agents
+  // Re-check when agent status changes (container may not be ready on first render)
+  const agentStatus = agent?.status;
+  useEffect(() => {
+    window.jam.sandbox.desktopStatus(agentId).then((status) => {
+      if (status.available && status.noVncPort) {
+        setNoVncUrl(`http://localhost:${status.noVncPort}`);
+      } else {
+        setNoVncUrl(null);
+      }
+    }).catch(() => setNoVncUrl(null));
+  }, [agentId, agentStatus]);
 
   const refreshServices = useCallback(async () => {
     try {
@@ -188,6 +202,8 @@ export function AgentDetailContainer({ agentId }: AgentDetailContainerProps) {
       onRestartService={handleRestartService}
       onOpenService={handleOpenService}
       isReflecting={isReflecting}
+      noVncUrl={noVncUrl}
+      isAgentRunning={agent.status === 'running' || agent.status === 'busy'}
     />
   );
 }

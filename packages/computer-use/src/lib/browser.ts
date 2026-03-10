@@ -173,15 +173,15 @@ export class PlaywrightBrowserProvider implements IBrowserProvider {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async loadPlaywright(): Promise<any> {
-    try {
-      // Variable indirection prevents TypeScript from resolving the module at compile time.
-      // Playwright is only available at runtime inside Docker containers.
-      const mod = 'playwright';
-      return await import(mod);
-    } catch {
-      throw new Error(
-        'Playwright is not installed. Run: npx playwright install chromium',
-      );
+    // Try playwright-core first (lighter, no bundled browsers), then full playwright.
+    // Variable indirection prevents TypeScript from resolving the module at compile time.
+    for (const mod of ['playwright-core', 'playwright']) {
+      try {
+        return await import(mod);
+      } catch { /* try next */ }
     }
+    throw new Error(
+      'Playwright is not installed. Install playwright-core or playwright.',
+    );
   }
 }

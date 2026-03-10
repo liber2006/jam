@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -101,6 +102,15 @@ export class ContainerManager implements IContainerManager {
       } catch { /* skip if not accessible */ }
     }
 
+    // Desktop containers: add noVNC port mapping (replaces last standard port)
+    // Must happen BEFORE creating the ContainerInfo Map snapshot
+    if (isDesktop && this.config.computerUse.noVncEnabled) {
+      const lastMapping = portMappings[portMappings.length - 1];
+      if (lastMapping) {
+        lastMapping.containerPort = NOVNC_CONTAINER_PORT;
+      }
+    }
+
     const info: ContainerInfo = {
       containerId: '',
       agentId,
@@ -114,6 +124,7 @@ export class ContainerManager implements IContainerManager {
     const namedVolumes = [
       { volumeName: `${safeName}-local`, containerPath: `${agentHome}/.local` },
       { volumeName: `${safeName}-cache`, containerPath: `${agentHome}/.cache` },
+      { volumeName: `${safeName}-config`, containerPath: `${agentHome}/.config` },
     ];
 
     // Write seccomp profile to disk if enabled
@@ -127,14 +138,6 @@ export class ContainerManager implements IContainerManager {
         log.info(`Wrote seccomp profile to ${seccompPath}`);
       }
       seccompProfile = seccompPath;
-    }
-
-    // Desktop containers: add noVNC port mapping (replaces last standard port)
-    if (isDesktop && this.config.computerUse.noVncEnabled) {
-      const lastMapping = portMappings[portMappings.length - 1];
-      if (lastMapping) {
-        lastMapping.containerPort = NOVNC_CONTAINER_PORT;
-      }
     }
 
     // Desktop containers: inject environment and change entrypoint
@@ -188,6 +191,12 @@ export class ContainerManager implements IContainerManager {
       this.containers.set(agentId, info);
       log.info(`Container started for agent "${agentName}" (${containerId.slice(0, 12)})`);
 
+      // Desktop containers: wait for computer-use server to be ready before returning
+      // This prevents the agent PTY from starting before the desktop services are up
+      if (isDesktop) {
+        await this.waitForComputerUse(containerId, COMPUTER_USE_CONTAINER_PORT);
+      }
+
       return info;
     } catch (error) {
       info.status = 'stopped';
@@ -237,6 +246,33 @@ export class ContainerManager implements IContainerManager {
     for (const [agentId] of this.containers) {
       this.stop(agentId);
     }
+  }
+
+  /** Wait for the computer-use HTTP server inside a desktop container to be ready.
+   *  Non-blocking: spawns a single `docker exec` that polls internally, resolves on exit. */
+  private waitForComputerUse(containerId: string, port: number): Promise<void> {
+    return new Promise((resolve) => {
+      const proc = spawn('docker', [
+        'exec', containerId, 'sh', '-c',
+        `for i in $(seq 1 30); do curl -sf http://127.0.0.1:${port}/status >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1`,
+      ], { stdio: 'ignore' });
+
+      const timeout = setTimeout(() => {
+        proc.kill();
+        log.warn('Computer-use readiness check timed out — agent will start anyway');
+        resolve();
+      }, 20_000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) {
+          log.info('Computer-use server ready');
+        } else {
+          log.warn('Computer-use server did not become ready — agent will start anyway');
+        }
+        resolve();
+      });
+    });
   }
 
   /** Remove named Docker volumes associated with an agent */

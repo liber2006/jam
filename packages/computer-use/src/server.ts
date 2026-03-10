@@ -45,7 +45,7 @@ export class ComputerUseServer {
   /** Start listening on the given port */
   start(port: number): Promise<void> {
     return new Promise((resolve) => {
-      this.server = this.app.listen(port, '0.0.0.0', () => {
+      this.server = this.app.listen(port, '::', () => {
         console.log(`[computer-use] Server listening on port ${port}`);
         resolve();
       });
