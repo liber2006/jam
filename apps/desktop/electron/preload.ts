@@ -441,6 +441,7 @@ export interface JamAPI {
     getTier: () => Promise<string>;
     listWorktrees: () => Promise<Array<Record<string, unknown>>>;
     removeWorktree: (agentId: string) => Promise<{ success: boolean; error?: string }>;
+    desktopStatus: (agentId: string) => Promise<{ available: boolean; noVncPort?: number; resolution?: string }>;
   };
 
   merge: {
@@ -671,6 +672,7 @@ contextBridge.exposeInMainWorld('jam', {
     getTier: () => ipcRenderer.invoke('sandbox:getTier'),
     listWorktrees: () => ipcRenderer.invoke('sandbox:listWorktrees'),
     removeWorktree: (agentId) => ipcRenderer.invoke('sandbox:removeWorktree', agentId),
+    desktopStatus: (agentId) => ipcRenderer.invoke('sandbox:desktopStatus', agentId),
   },
 
   merge: {

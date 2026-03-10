@@ -15,6 +15,10 @@ const LABEL_AGENT_ID = 'com.jam.agent-id';
 /** Container name prefix — matches DockerClient convention */
 const CONTAINER_PREFIX = 'jam-';
 
+/** Well-known container ports for desktop services */
+const COMPUTER_USE_CONTAINER_PORT = 3100;
+const NOVNC_CONTAINER_PORT = 6080;
+
 /** Sanitize agent name for use as a Docker container name */
 function sanitizeName(agentName: string): string {
   return (
@@ -33,6 +37,8 @@ function sanitizeName(agentName: string): string {
  */
 export class ContainerManager implements IContainerManager {
   private containers = new Map<string, ContainerInfo>();
+  /** Track named volumes per agent so we can clean them up on removal */
+  private volumeNames = new Map<string, string[]>();
 
   constructor(
     private readonly docker: DockerClient,
@@ -57,6 +63,9 @@ export class ContainerManager implements IContainerManager {
 
     // Allocate port range
     const portMappings = this.portAllocator.buildPortMappings(agentId);
+
+    // Determine if this is a desktop container (computer-use enabled)
+    const isDesktop = options.computerUse && this.config.computerUse.enabled;
 
     // Build volume mounts
     const volumes: Array<{ hostPath: string; containerPath: string; readOnly?: boolean }> = [
@@ -120,6 +129,35 @@ export class ContainerManager implements IContainerManager {
       seccompProfile = seccompPath;
     }
 
+    // Desktop containers: add noVNC port mapping (replaces last standard port)
+    if (isDesktop && this.config.computerUse.noVncEnabled) {
+      const lastMapping = portMappings[portMappings.length - 1];
+      if (lastMapping) {
+        lastMapping.containerPort = NOVNC_CONTAINER_PORT;
+      }
+    }
+
+    // Desktop containers: inject environment and change entrypoint
+    const containerEnv = { ...options.env };
+    let command: string[];
+    let pidsLimit = this.config.pidsLimit;
+
+    if (isDesktop) {
+      containerEnv.DISPLAY = ':99';
+      containerEnv.JAM_COMPUTER_USE = '1';
+      containerEnv.COMPUTER_USE_PORT = String(COMPUTER_USE_CONTAINER_PORT);
+      containerEnv.SCREEN_RESOLUTION = this.config.computerUse.resolution;
+      command = ['/usr/local/bin/start-desktop.sh'];
+      // Desktop needs more processes (Xvfb, fluxbox, x11vnc, noVNC, computer-use server)
+      pidsLimit = Math.max(pidsLimit, 512);
+      log.info(`Desktop container for "${agentName}" — resolution ${this.config.computerUse.resolution}`);
+    } else {
+      command = ['sleep', 'infinity'];
+    }
+
+    // Track named volumes for cleanup
+    this.volumeNames.set(agentId, namedVolumes.map(v => v.volumeName));
+
     try {
       // Create the container
       const containerId = this.docker.createContainer({
@@ -130,13 +168,13 @@ export class ContainerManager implements IContainerManager {
         },
         cpus: this.config.cpus,
         memoryMb: this.config.memoryMb,
-        pidsLimit: this.config.pidsLimit,
+        pidsLimit,
         volumes,
         namedVolumes,
         portMappings,
         workdir: '/workspace',
-        env: options.env,
-        command: ['sleep', 'infinity'],
+        env: containerEnv,
+        command,
         seccompProfile,
         diskQuotaMb: this.config.diskQuotaMb || undefined,
       });
@@ -153,12 +191,19 @@ export class ContainerManager implements IContainerManager {
       return info;
     } catch (error) {
       info.status = 'stopped';
+      // Clean up partially-created container so nothing is orphaned
+      if (info.containerId) {
+        log.warn(`Cleaning up partially-created container for "${agentName}"`);
+        this.docker.removeContainer(info.containerId);
+      }
+      this.portAllocator.release(agentId);
+      this.volumeNames.delete(agentId);
       log.error(`Failed to create/start container for agent "${agentName}": ${String(error)}`);
       throw error;
     }
   }
 
-  /** Stop and remove a container for an agent */
+  /** Stop and remove a container for an agent (full cleanup including volumes) */
   stop(agentId: string): void {
     const info = this.containers.get(agentId);
     if (!info) return;
@@ -168,6 +213,7 @@ export class ContainerManager implements IContainerManager {
 
     this.docker.stopContainer(info.containerId, this.config.stopTimeoutSec);
     this.docker.removeContainer(info.containerId);
+    this.cleanupVolumes(agentId);
     this.portAllocator.release(agentId);
     this.containers.delete(agentId);
 
@@ -183,13 +229,25 @@ export class ContainerManager implements IContainerManager {
       this.portAllocator.release(agentId);
     }
     this.containers.clear();
+    // Note: volumes are NOT cleaned on stopAll — containers may be reclaimed on restart
   }
 
-  /** Stop and remove all containers (full cleanup) */
+  /** Stop and remove all containers (full cleanup including volumes) */
   removeAll(): void {
     for (const [agentId] of this.containers) {
       this.stop(agentId);
     }
+  }
+
+  /** Remove named Docker volumes associated with an agent */
+  private cleanupVolumes(agentId: string): void {
+    const volumes = this.volumeNames.get(agentId);
+    if (!volumes) return;
+    for (const name of volumes) {
+      this.docker.removeVolume(name);
+    }
+    this.volumeNames.delete(agentId);
+    log.info(`Cleaned up ${volumes.length} named volume(s) for agent ${agentId}`);
   }
 
   /**
@@ -252,5 +310,19 @@ export class ContainerManager implements IContainerManager {
   /** Get info about all managed containers */
   listContainers(): ContainerInfo[] {
     return Array.from(this.containers.values());
+  }
+
+  /** Get the host port for the noVNC viewer (if desktop container) */
+  getNoVncPort(agentId: string): number | undefined {
+    const info = this.containers.get(agentId);
+    if (!info) return undefined;
+    return info.portMappings.get(NOVNC_CONTAINER_PORT);
+  }
+
+  /** Get the host port for the computer-use API (if desktop container) */
+  getComputerUsePort(agentId: string): number | undefined {
+    const info = this.containers.get(agentId);
+    if (!info) return undefined;
+    return info.portMappings.get(COMPUTER_USE_CONTAINER_PORT);
   }
 }

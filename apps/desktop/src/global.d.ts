@@ -480,6 +480,7 @@ export interface JamAPI {
       repoPath: string;
     }>>;
     removeWorktree: (agentId: string) => Promise<{ success: boolean; error?: string }>;
+    desktopStatus: (agentId: string) => Promise<{ available: boolean; noVncPort?: number; resolution?: string }>;
   };
 
   merge: {

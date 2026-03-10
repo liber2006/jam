@@ -6,6 +6,7 @@ import { AgentActivityList } from '@/components/dashboard/AgentActivityList';
 import { AgentServicesList } from '@/components/dashboard/AgentServicesList';
 import { AgentRelationships } from '@/components/dashboard/AgentRelationships';
 import { AgentInbox } from '@/components/dashboard/AgentInbox';
+import { AgentDesktopViewer } from '@/components/dashboard/AgentDesktopViewer';
 
 interface ServiceEntry {
   port: number;
@@ -69,9 +70,13 @@ interface AgentDetailViewProps {
   onRestartService: (serviceName: string) => void;
   onOpenService: (port: number) => void;
   isReflecting?: boolean;
+  /** noVNC URL for desktop viewer (null if computer use not enabled) */
+  noVncUrl?: string | null;
+  /** Whether the agent is currently running */
+  isAgentRunning?: boolean;
 }
 
-const tabs = ['Soul', 'Stats', 'Tasks', 'Inbox', 'Activity', 'Services', 'Relationships'] as const;
+const tabs = ['Soul', 'Stats', 'Tasks', 'Inbox', 'Activity', 'Desktop', 'Services', 'Relationships'] as const;
 type Tab = (typeof tabs)[number];
 
 export function AgentDetailView({
@@ -90,6 +95,8 @@ export function AgentDetailView({
   onRestartService,
   onOpenService,
   isReflecting = false,
+  noVncUrl = null,
+  isAgentRunning = false,
 }: AgentDetailViewProps) {
   const [activeTab, setActiveTab] = useState<Tab>('Soul');
 
@@ -228,6 +235,14 @@ export function AgentDetailView({
 
         {activeTab === 'Activity' && (
           <AgentActivityList activity={activity} agents={agents} />
+        )}
+
+        {activeTab === 'Desktop' && (
+          <AgentDesktopViewer
+            noVncUrl={noVncUrl}
+            agentName={agent.name}
+            isRunning={isAgentRunning}
+          />
         )}
 
         {activeTab === 'Services' && (

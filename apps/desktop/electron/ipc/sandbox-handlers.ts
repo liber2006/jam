@@ -6,10 +6,22 @@ import { createLogger } from '@jam/core';
 
 const log = createLogger('SandboxHandlers');
 
+export interface DesktopStatusResult {
+  available: boolean;
+  noVncPort?: number;
+  resolution?: string;
+}
+
+/** Narrow interface for container manager desktop queries */
+interface IDesktopPortResolver {
+  getNoVncPort(agentId: string): number | undefined;
+}
+
 export interface SandboxHandlerDeps {
   worktreeManager: WorktreeManager | null;
   mergeService: MergeService | null;
   config: JamConfig;
+  desktopPortResolver: IDesktopPortResolver | null;
 }
 
 export function registerSandboxHandlers(deps: SandboxHandlerDeps): void {
@@ -31,6 +43,19 @@ export function registerSandboxHandlers(deps: SandboxHandlerDeps): void {
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  });
+
+  // --- Desktop status ---
+  ipcMain.handle('sandbox:desktopStatus', (_e, agentId: string): DesktopStatusResult => {
+    if (!deps.desktopPortResolver || !deps.config.sandbox?.computerUse?.enabled) {
+      return { available: false };
+    }
+    const noVncPort = deps.desktopPortResolver.getNoVncPort(agentId);
+    return {
+      available: !!noVncPort,
+      noVncPort: noVncPort ?? undefined,
+      resolution: deps.config.sandbox.computerUse.resolution,
+    };
   });
 
   // --- Merge operations ---

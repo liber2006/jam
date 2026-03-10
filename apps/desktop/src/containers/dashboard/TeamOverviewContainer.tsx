@@ -52,6 +52,20 @@ export function TeamOverviewContainer({ onSelectAgent }: TeamOverviewContainerPr
     }
   }, [agentIds]);
 
+  const taskSparklines = useMemo(
+    () => buildSparklines(tasks, agentIds),
+    [tasks, agentIds],
+  );
+
+  const agentList = useMemo(() => Object.values(agents).map((a) => ({
+    id: a.profile.id,
+    name: a.profile.name,
+    color: a.profile.color,
+    avatarUrl: a.profile.avatarUrl,
+    status: a.status,
+    role: souls[a.profile.id]?.role ?? undefined,
+  })), [agents, souls]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48 text-zinc-500">
@@ -59,20 +73,6 @@ export function TeamOverviewContainer({ onSelectAgent }: TeamOverviewContainerPr
       </div>
     );
   }
-
-  const taskSparklines = useMemo(
-    () => buildSparklines(tasks, agentIds),
-    [tasks, agentIds],
-  );
-
-  const agentList = Object.values(agents).map((a) => ({
-    id: a.profile.id,
-    name: a.profile.name,
-    color: a.profile.color,
-    avatarUrl: a.profile.avatarUrl,
-    status: a.status,
-    role: souls[a.profile.id]?.role ?? undefined,
-  }));
 
   return (
     <div className="space-y-6">

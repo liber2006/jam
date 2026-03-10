@@ -35,6 +35,8 @@ interface WorktreeSettings {
 
 interface SandboxDockerSettings {
   containerExitBehavior: ContainerExitBehavior;
+  computerUseEnabled: boolean;
+  computerUseResolution: string;
 }
 
 interface BrainConfig {
@@ -91,7 +93,7 @@ const DEFAULT_CONFIG: Config = {
     denyWrite: ['.env', '*.pem', '*.key'],
   },
   worktree: { autoCreate: true, worktreeDir: '.jam-worktrees' },
-  sandbox: { containerExitBehavior: 'stop' },
+  sandbox: { containerExitBehavior: 'stop', computerUseEnabled: false, computerUseResolution: '1920x1080' },
   brain: { enabled: false, url: 'http://localhost:8080' },
 };
 

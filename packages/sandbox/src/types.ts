@@ -5,6 +5,16 @@ export type ContainerExitBehavior = 'stop' | 'delete' | 'keep-running';
 
 export type NetworkPolicy = 'unrestricted' | 'host-bridge-only';
 
+/** Virtual desktop configuration for computer-use agents */
+export interface ComputerUseConfig {
+  /** Enable virtual desktop in Docker containers (default: false) */
+  enabled: boolean;
+  /** Screen resolution (default: '1920x1080') */
+  resolution: string;
+  /** Enable noVNC web viewer for dashboard (default: true) */
+  noVncEnabled: boolean;
+}
+
 export interface SandboxConfig {
   /** Whether sandbox mode is enabled */
   enabled: boolean;
@@ -34,6 +44,8 @@ export interface SandboxConfig {
   diskQuotaMb: number;
   /** Path for audit log file (JSONL). Empty string = disabled. */
   auditLogPath: string;
+  /** Virtual desktop configuration for computer-use agents */
+  computerUse: ComputerUseConfig;
 }
 
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
@@ -51,4 +63,9 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   networkPolicy: 'unrestricted',
   diskQuotaMb: 0,
   auditLogPath: '',
+  computerUse: {
+    enabled: false,
+    resolution: '1920x1080',
+    noVncEnabled: true,
+  },
 };

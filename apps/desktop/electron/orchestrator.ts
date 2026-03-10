@@ -2,7 +2,7 @@ import { app, BrowserWindow, shell, clipboard, Notification } from 'electron';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readFile, readdir, stat, mkdir, writeFile, unlink } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { EventBus } from '@jam/eventbus';
 import {
   PtyManager,
@@ -28,6 +28,7 @@ import {
   ImageManager,
   HostBridge,
   AGENT_DOCKERFILE,
+  DESKTOP_STARTUP_SCRIPT,
 } from '@jam/sandbox';
 import {
   OsSandboxedPtyManager,
@@ -73,6 +74,62 @@ import { loadConfig, type JamConfig, type STTProviderType, type TTSProviderType 
 
 const log = createLogger('Orchestrator');
 
+/**
+ * Build Docker context files for the agent sandbox image.
+ * Reads @jam/computer-use source from the workspace so `yarn dev` just works —
+ * no manual Docker build steps needed.
+ */
+function buildDockerContext(): Record<string, string> {
+  const files: Record<string, string> = {
+    'start-desktop.sh': DESKTOP_STARTUP_SCRIPT,
+  };
+
+  // Find computer-use package source in the workspace
+  const cuSrcDir = resolveComputerUseSrc();
+  if (!cuSrcDir) {
+    log.warn('Could not locate @jam/computer-use source — desktop agents will lack computer-use server');
+    return files;
+  }
+
+  // Production-only package.json (just the express runtime dependency)
+  files['computer-use/package.json'] = JSON.stringify({
+    name: 'computer-use',
+    private: true,
+    type: 'module',
+    dependencies: { express: '^4.21.0' },
+  }, null, 2);
+
+  // Bundle all TypeScript source files
+  try {
+    const entries = readdirSync(cuSrcDir, { recursive: true, encoding: 'utf-8' });
+    for (const entry of entries) {
+      if (typeof entry === 'string' && entry.endsWith('.ts')) {
+        files[`computer-use/src/${entry}`] = readFileSync(join(cuSrcDir, entry), 'utf-8');
+      }
+    }
+    log.info(`Bundled ${Object.keys(files).length} files for Docker build context`);
+  } catch (err) {
+    log.warn('Failed to read computer-use source files:', err);
+  }
+
+  return files;
+}
+
+/** Locate the @jam/computer-use src/ directory via workspace resolution */
+function resolveComputerUseSrc(): string | null {
+  // Try require.resolve (works with Yarn workspaces + node_modules linker)
+  try {
+    const pkgPath = require.resolve('@jam/computer-use/package.json');
+    const srcDir = join(pkgPath, '..', 'src');
+    if (existsSync(srcDir)) return srcDir;
+  } catch { /* fallback */ }
+
+  // Try relative to CWD (monorepo root)
+  const fromCwd = join(process.cwd(), 'packages', 'computer-use', 'src');
+  if (existsSync(fromCwd)) return fromCwd;
+
+  return null;
+}
 
 const DEATH_PHRASES = [
   '{name} has left the building. Permanently.',
@@ -172,8 +229,9 @@ export class Orchestrator {
         // Reclaim running containers from a previous session (e.g. hot reload)
         this.reclaimedAgentIds = this.containerManager.reclaimExisting();
 
-        // Ensure agent image exists
-        const imageManager = new ImageManager(docker, AGENT_DOCKERFILE);
+        // Ensure agent image exists — bundle computer-use source into Docker build context
+        const extraContextFiles = buildDockerContext();
+        const imageManager = new ImageManager(docker, AGENT_DOCKERFILE, extraContextFiles);
         this.config.sandbox.imageName = imageManager.resolveTag(this.config.sandbox.imageName);
         let lastProgressAt = 0;
         let pendingLine = '';
@@ -198,6 +256,7 @@ export class Orchestrator {
             status: 'error',
             message: `Failed to build sandbox image: ${String(err)}`,
           });
+          throw err; // Re-throw so startAutoStartAgents knows the image is NOT ready
         });
 
         // Start host bridge
@@ -355,6 +414,7 @@ export class Orchestrator {
           agentName: profile.name,
           workspacePath: profile.cwd ?? join(homedir(), '.jam', 'agents', profile.name),
           sharedSkillsPath: sharedSkillsDir,
+          computerUse: profile.allowComputerUse,
         });
       });
 
@@ -611,6 +671,12 @@ export class Orchestrator {
     if (this.config.sandboxTier === 'docker' && this.hostBridge) {
       const bridgeSkillPath = join(dir, 'host-bridge.md');
       await writeFile(bridgeSkillPath, HOST_BRIDGE_SKILL, 'utf-8');
+    }
+
+    // Computer use skill — only when Docker + computer use is globally enabled
+    if (this.config.sandboxTier === 'docker' && this.config.sandbox?.computerUse?.enabled) {
+      const computerUseSkillPath = join(dir, 'computer-use.md');
+      await writeFile(computerUseSkillPath, COMPUTER_USE_SKILL, 'utf-8');
     }
   }
 
@@ -1105,7 +1171,13 @@ export class Orchestrator {
     const phase = (name: string) => log.info(`[Startup Timing] ${name} at +${Date.now() - t0}ms`);
 
     // Wait for Docker image to be ready before launching any containers
-    await this.imageReady;
+    try {
+      await this.imageReady;
+    } catch (err) {
+      log.error('Docker image build failed — cannot start agents in sandbox mode');
+      phase('imageReady (FAILED)');
+      return; // Don't attempt to start agents without a working image
+    }
     phase('imageReady');
 
     // Import agent folders from disk that aren't registered yet (e.g. created by JAM)
@@ -1329,8 +1401,8 @@ export class Orchestrator {
       'service cleanup',
     );
 
-    // Stop host bridge
-    this.hostBridge?.stop().catch(() => {});
+    // Stop host bridge — await to ensure the socket is fully released
+    await this.hostBridge?.stop().catch(() => {});
 
     if (keepContainers) {
       // HMR: keep containers running — they'll be reclaimed on next startup
@@ -1679,4 +1751,62 @@ const HOST_BRIDGE_SKILL = [
   '- The bridge only allows whitelisted operations — arbitrary commands are not supported',
   '- AppleScript: `do shell script` and keystroke simulation are blocked for security',
   '- Always check the response `success` field before assuming the operation worked',
+].join('\n');
+
+const COMPUTER_USE_SKILL = [
+  '---',
+  'name: computer-use',
+  'description: Control the virtual desktop — screenshots, clicks, typing, browser automation',
+  'triggers: screenshot, click, screen, browser, desktop, window, type text, scroll, gui, ui, button, menu, navigate, launch, computer use, automate, observe',
+  '---',
+  '',
+  '# Computer Use',
+  '',
+  'You have a virtual Linux desktop. Control it via HTTP API at localhost:3100.',
+  '',
+  '## Quick Reference',
+  '',
+  '### Observe (see the full screen state)',
+  '```bash',
+  'curl -s localhost:3100/observe | jq',
+  'curl -s localhost:3100/screenshot > /tmp/screen.png',
+  'curl -s localhost:3100/status | jq',
+  '```',
+  '',
+  '### Click & Type',
+  '```bash',
+  'curl -s -X POST localhost:3100/click -H \'Content-Type: application/json\' -d \'{"x":500,"y":300}\'',
+  'curl -s -X POST localhost:3100/type -H \'Content-Type: application/json\' -d \'{"text":"hello world"}\'',
+  'curl -s -X POST localhost:3100/key -H \'Content-Type: application/json\' -d \'{"key":"ctrl+s"}\'',
+  'curl -s -X POST localhost:3100/scroll -H \'Content-Type: application/json\' -d \'{"direction":"down","amount":3}\'',
+  '```',
+  '',
+  '### Windows',
+  '```bash',
+  'curl -s localhost:3100/windows | jq',
+  'curl -s -X POST localhost:3100/focus -H \'Content-Type: application/json\' -d \'{"title":"Chromium"}\'',
+  'curl -s -X POST localhost:3100/launch -H \'Content-Type: application/json\' -d \'{"command":"xterm"}\'',
+  '```',
+  '',
+  '### Browser (Playwright)',
+  '```bash',
+  'curl -s -X POST localhost:3100/browser/launch -H \'Content-Type: application/json\' -d \'{"url":"https://example.com"}\'',
+  'curl -s localhost:3100/browser/snapshot | jq',
+  'curl -s -X POST localhost:3100/browser/click -H \'Content-Type: application/json\' -d \'{"text":"Sign in"}\'',
+  'curl -s -X POST localhost:3100/browser/type -H \'Content-Type: application/json\' -d \'{"selector":"#email","text":"user@example.com"}\'',
+  'curl -s -X POST localhost:3100/browser/eval -H \'Content-Type: application/json\' -d \'{"expression":"document.title"}\'',
+  'curl -s localhost:3100/browser/screenshot | jq',
+  '```',
+  '',
+  '### Wait for changes',
+  '```bash',
+  'curl -s -X POST localhost:3100/wait -H \'Content-Type: application/json\' -d \'{"change":true,"timeout":5}\'',
+  '```',
+  '',
+  '## Tips',
+  '- Use /observe first to see the full screen state',
+  '- Screenshots are base64 PNG by default, add ?format=jpeg&quality=60 for smaller payloads',
+  '- Browser commands use Playwright (fastest, most reliable for web automation)',
+  '- For native Linux GUI apps, use /click + /type + /key with coordinates from /screenshot',
+  '- All responses are JSON: {"success": true, "data": {...}, "duration_ms": N}',
 ].join('\n');

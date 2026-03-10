@@ -54,6 +54,8 @@ export interface AgentProfile {
   useWorktree?: boolean;
   /** Agent role in team coordination */
   agentRole?: 'worker' | 'supervisor';
+  /** Allow this agent to access the virtual desktop (screenshot, click, type, browser) */
+  allowComputerUse?: boolean;
 }
 
 export interface AgentState {

@@ -31,6 +31,7 @@ export interface AgentFormValues {
   autoStart?: boolean;
   allowFullAccess?: boolean;
   allowInterrupts?: boolean;
+  allowComputerUse?: boolean;
   secretBindings?: SecretBinding[];
 }
 
@@ -64,6 +65,7 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
   const [autoStart, setAutoStart] = useState(initialValues?.autoStart ?? false);
   const [allowFullAccess, setAllowFullAccess] = useState(initialValues?.allowFullAccess ?? false);
   const [allowInterrupts, setAllowInterrupts] = useState(initialValues?.allowInterrupts ?? false);
+  const [allowComputerUse, setAllowComputerUse] = useState(initialValues?.allowComputerUse ?? false);
   const [secretBindings, setSecretBindings] = useState<SecretBinding[]>(initialValues?.secretBindings ?? []);
   const [availableSecrets, setAvailableSecrets] = useState<SecretInfo[]>([]);
   const [testingVoice, setTestingVoice] = useState(false);
@@ -124,6 +126,7 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
       autoStart,
       allowFullAccess,
       allowInterrupts,
+      allowComputerUse,
       secretBindings: validBindings.length > 0 ? validBindings : undefined,
     });
   };
@@ -342,6 +345,19 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
           />
           <label htmlFor="allowInterrupts" className="text-xs text-zinc-400">
             Allow interrupts <span className="text-zinc-600">(new commands abort the current task)</span>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="allowComputerUse"
+            checked={allowComputerUse}
+            onChange={(e) => setAllowComputerUse(e.target.checked)}
+            className="rounded border-zinc-600 bg-zinc-800 text-violet-500 focus:ring-violet-500 focus:ring-offset-zinc-900"
+          />
+          <label htmlFor="allowComputerUse" className="text-xs text-zinc-400">
+            Computer Use <span className="text-zinc-600">(virtual desktop — screenshot, click, type, browser)</span>
           </label>
         </div>
       </div>

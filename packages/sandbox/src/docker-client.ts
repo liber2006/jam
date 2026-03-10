@@ -231,6 +231,18 @@ export class DockerClient implements IDockerClient {
     }
   }
 
+  /** Remove a named Docker volume (best-effort) */
+  removeVolume(name: string): void {
+    try {
+      execFileSync(this.docker, ['volume', 'rm', '-f', name], {
+        timeout: 10_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch {
+      log.warn(`Failed to remove volume ${name}`);
+    }
+  }
+
   /** Get container status */
   getContainerStatus(id: string): 'running' | 'stopped' | 'not-found' {
     try {

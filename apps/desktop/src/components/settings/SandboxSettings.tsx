@@ -18,6 +18,8 @@ interface WorktreeConfig {
 
 interface DockerConfig {
   containerExitBehavior: ContainerExitBehavior;
+  computerUseEnabled: boolean;
+  computerUseResolution: string;
 }
 
 interface SandboxSettingsProps {
@@ -148,6 +150,42 @@ export const SandboxSettings: React.FC<SandboxSettingsProps> = ({
               <p className="text-xs text-zinc-600 mt-1">
                 {EXIT_OPTIONS.find(o => o.id === docker.containerExitBehavior)?.desc}
               </p>
+            </div>
+
+            {/* Computer Use */}
+            <div className="pt-3 border-t border-zinc-700/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-xs text-zinc-400">Virtual Desktop</label>
+                  <p className="text-[10px] text-zinc-600">Agents with Computer Use get an isolated Linux desktop</p>
+                </div>
+                <button
+                  onClick={() => onDockerChange({ computerUseEnabled: !docker.computerUseEnabled })}
+                  className={`relative w-9 h-5 rounded-full transition-colors ${
+                    docker.computerUseEnabled ? 'bg-blue-600' : 'bg-zinc-700'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      docker.computerUseEnabled ? 'translate-x-4' : ''
+                    }`}
+                  />
+                </button>
+              </div>
+              {docker.computerUseEnabled && (
+                <div className="mt-2">
+                  <label className="block text-[10px] text-zinc-500 mb-0.5">Resolution</label>
+                  <select
+                    value={docker.computerUseResolution}
+                    onChange={(e) => onDockerChange({ computerUseResolution: e.target.value })}
+                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
+                  >
+                    <option value="1280x720">1280x720</option>
+                    <option value="1920x1080">1920x1080</option>
+                    <option value="2560x1440">2560x1440</option>
+                  </select>
+                </div>
+              )}
             </div>
           </div>
         )}

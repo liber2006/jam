@@ -312,6 +312,9 @@ function registerIpcHandlers(): void {
     worktreeManager: orchestrator.worktreeManager,
     mergeService: orchestrator.mergeService,
     config: orchestrator.config,
+    desktopPortResolver: orchestrator.containerManager && 'getNoVncPort' in orchestrator.containerManager
+      ? orchestrator.containerManager as unknown as { getNoVncPort(agentId: string): number | undefined }
+      : null,
   });
 
   // App + Logs (trivial, kept inline)
