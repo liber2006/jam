@@ -298,18 +298,19 @@ export class AgentContextBuilder {
     sections.push(`Your name is ${profile.name}. When asked who you are, respond as ${profile.name}.`);
 
     // 2. Workspace + Execution Environment
-    if (profile.cwd) {
+    if (this.executionEnv.mode === 'sandbox') {
+      // In sandbox mode, show the CONTAINER path — never the host path (it doesn't exist in the container)
+      const containerWorkdir = this.executionEnv.containerWorkdir ?? '/workspace';
       sections.push(
-        `Your workspace directory is: ${profile.cwd}`,
+        `Your workspace directory is: ${containerWorkdir}`,
         'All files you create should be placed in this directory unless the user specifies otherwise.',
       );
-    }
 
-    if (this.executionEnv.mode === 'sandbox') {
       const envLines = [
         '--- EXECUTION ENVIRONMENT ---',
-        'You are running inside a Docker container (sandboxed environment).',
-        `Your working directory inside the container is: ${this.executionEnv.containerWorkdir ?? '/workspace'}`,
+        'You are running inside a Docker container (Ubuntu Linux).',
+        'Your Bash tool and all commands execute INSIDE this container — not on the host.',
+        `Your working directory is: ${containerWorkdir}`,
         'Your workspace is bind-mounted from the host — file changes persist.',
       ];
       if (this.executionEnv.mounts?.length) {
@@ -329,6 +330,13 @@ export class AgentContextBuilder {
       envLines.push('--- END EXECUTION ENVIRONMENT ---');
       sections.push(envLines.join('\n'));
     } else {
+      // Host mode — show the actual host path
+      if (profile.cwd) {
+        sections.push(
+          `Your workspace directory is: ${profile.cwd}`,
+          'All files you create should be placed in this directory unless the user specifies otherwise.',
+        );
+      }
       sections.push(
         '--- EXECUTION ENVIRONMENT ---',
         'You are running natively on the host machine (no sandbox).',
