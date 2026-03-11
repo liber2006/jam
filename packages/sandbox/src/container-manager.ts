@@ -194,6 +194,8 @@ export class ContainerManager implements IContainerManager {
         command,
         seccompProfile,
         diskQuotaMb: this.config.diskQuotaMb || undefined,
+        // Desktop containers need larger shared memory for Chromium/Playwright
+        shmSizeMb: isDesktop ? 512 : undefined,
       });
 
       info.containerId = containerId;

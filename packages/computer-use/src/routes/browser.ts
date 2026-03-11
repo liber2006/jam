@@ -126,6 +126,19 @@ export function createBrowserRoutes(provider: IBrowserProvider): Router {
     }
   });
 
+  /** Raw binary browser screenshot — returns PNG bytes directly */
+  router.get('/browser/screenshot/raw', async (_req, res) => {
+    try {
+      const result = await provider.screenshot();
+      const buffer = Buffer.from(result.base64, 'base64');
+      res.setHeader('Content-Type', result.format === 'jpeg' ? 'image/jpeg' : 'image/png');
+      res.setHeader('Content-Length', buffer.length);
+      res.end(buffer);
+    } catch (error) {
+      res.status(500).json({ success: false, error: String(error) });
+    }
+  });
+
   router.post('/browser/eval', async (req, res) => {
     const start = Date.now();
     try {

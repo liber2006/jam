@@ -57,7 +57,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   enabled: false,
   cpus: 2,
   memoryMb: 4096,
-  pidsLimit: 256,
+  pidsLimit: 512,
   portRangeStart: 10_000,
   portsPerAgent: 20,
   imageName: 'jam-agent:latest',

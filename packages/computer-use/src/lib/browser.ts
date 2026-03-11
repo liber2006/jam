@@ -29,6 +29,13 @@ export class PlaywrightBrowserProvider implements IBrowserProvider {
   private page: PlaywrightPage = null;
 
   async launch(options?: BrowserLaunchOptions): Promise<void> {
+    // If browser reference exists but process crashed, clean up the stale state
+    if (this.browser && !this.browser.isConnected()) {
+      try { await this.browser.close(); } catch { /* already dead */ }
+      this.browser = null;
+      this.page = null;
+    }
+
     if (this.browser) {
       // Navigate existing browser instead of relaunching
       if (options?.url && this.page) {
@@ -58,7 +65,7 @@ export class PlaywrightBrowserProvider implements IBrowserProvider {
 
   async close(): Promise<void> {
     if (this.browser) {
-      await this.browser.close();
+      try { await this.browser.close(); } catch { /* may already be dead */ }
       this.browser = null;
       this.page = null;
     }
