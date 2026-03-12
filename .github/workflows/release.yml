@@ -15,17 +15,29 @@ on:
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.calc.outputs.version }}
       tag: ${{ steps.calc.outputs.tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: Calculate version
+      - name: Calculate version from latest tag
         id: calc
         run: |
-          CURRENT=$(node -p "require('./apps/desktop/package.json').version")
+          # Derive version from the latest git tag (source of truth), not package.json.
+          # This avoids collisions when package.json wasn't bumped after a prior release.
+          LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            CURRENT="0.0.0"
+          else
+            CURRENT="${LATEST_TAG#v}"
+          fi
           IFS='.' read -r major minor patch <<< "$CURRENT"
           case "${{ inputs.bump }}" in
             major) major=$((major + 1)); minor=0; patch=0 ;;
@@ -33,9 +45,39 @@ jobs:
             patch) patch=$((patch + 1)) ;;
           esac
           VERSION="${major}.${minor}.${patch}"
+          TAG="v$VERSION"
+
+          # Safety: ensure this tag doesn't already exist
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists! Aborting."
+            exit 1
+          fi
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Bumping $CURRENT -> $VERSION (${{ inputs.bump }})"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Commit version bump
+        run: |
+          VERSION="${{ steps.calc.outputs.version }}"
+          # Stamp version into package.json so it stays in sync with the tag
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('apps/desktop/package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('apps/desktop/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/package.json
+          git commit -m "chore: bump version to $VERSION"
+          git tag "${{ steps.calc.outputs.tag }}"
+          git push origin HEAD --tags
 
   build:
     needs: version
@@ -54,10 +96,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
