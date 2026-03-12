@@ -325,6 +325,9 @@ export interface JamAPI {
         command: string;
       }) => void,
     ) => () => void;
+    onSystemNotification: (
+      callback: (data: { agentId: string; message: string }) => void,
+    ) => () => void;
   };
 
   tasks: {
@@ -342,6 +345,7 @@ export interface JamAPI {
       updates: Record<string, unknown>,
     ) => Promise<{ success: boolean; task?: Record<string, unknown>; error?: string }>;
     delete: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+    cancel: (taskId: string) => Promise<{ success: boolean; error?: string }>;
     createRecurring: (input: {
       title: string;
       description: string;
@@ -354,6 +358,9 @@ export interface JamAPI {
     }) => Promise<{ success: boolean; schedule?: Record<string, unknown>; error?: string }>;
     getPaused: () => Promise<boolean>;
     setPaused: (paused: boolean) => Promise<{ success: boolean; error?: string }>;
+    addDependency: (taskId: string, dependsOnTaskId: string) => Promise<{ success: boolean; task?: Record<string, unknown>; error?: string }>;
+    removeDependency: (taskId: string, dependsOnTaskId: string) => Promise<{ success: boolean; task?: Record<string, unknown>; error?: string }>;
+    getBlocked: () => Promise<Array<Record<string, unknown>>>;
     onCreated: (callback: (data: { task: Record<string, unknown> }) => void) => () => void;
     onUpdated: (callback: (data: { task: Record<string, unknown> }) => void) => () => void;
     onCompleted: (callback: (data: { task: Record<string, unknown>; durationMs: number }) => void) => () => void;
@@ -427,6 +434,42 @@ export interface JamAPI {
       rollback: (improvementId: string) => Promise<{ success: boolean; error?: string }>;
       health: () => Promise<{ healthy: boolean; lastCheck: string; issues: string[] }>;
     };
+    blackboard: {
+      listTopics: () => Promise<string[]>;
+      read: (topic: string, limit?: number) => Promise<Array<Record<string, unknown>>>;
+      publish: (agentId: string, topic: string, artifact: Record<string, unknown>) => Promise<{ success: boolean; artifact?: Record<string, unknown>; error?: string }>;
+    };
+  };
+
+  auth: {
+    login: (runtimeId: string) => Promise<{ success: boolean; error?: string }>;
+    setApiKey: (runtimeId: string, apiKey: string) => Promise<{ success: boolean; envVar?: string; error?: string }>;
+    removeApiKey: (runtimeId: string) => Promise<{ success: boolean }>;
+    statusAll: () => Promise<Array<{
+      runtimeId: string;
+      displayName: string;
+      authType: string;
+      authEnvVar?: string;
+      hasAuthCommand: boolean;
+      authenticated: boolean;
+      expired?: boolean;
+      hasApiKey: boolean;
+    }>>;
+    syncCredentials: () => Promise<{ success: boolean; error?: string; message?: string }>;
+  };
+
+  sandbox: {
+    getTier: () => Promise<string>;
+    listWorktrees: () => Promise<Array<Record<string, unknown>>>;
+    removeWorktree: (agentId: string) => Promise<{ success: boolean; error?: string }>;
+    desktopStatus: (agentId: string) => Promise<{ available: boolean; noVncPort?: number; resolution?: string }>;
+  };
+
+  merge: {
+    status: (agentId: string) => Promise<string>;
+    preview: (agentId: string, targetBranch?: string) => Promise<Record<string, unknown>>;
+    execute: (agentId: string, targetBranch?: string) => Promise<{ success: boolean; mergedFiles: number; error?: string }>;
+    abort: (agentId: string) => Promise<void>;
   };
 }
 
@@ -591,6 +634,9 @@ contextBridge.exposeInMainWorld('jam', {
     createRecurring: (input) => ipcRenderer.invoke('tasks:createRecurring', input),
     getPaused: () => ipcRenderer.invoke('tasks:getPaused'),
     setPaused: (paused) => ipcRenderer.invoke('tasks:setPaused', paused),
+    addDependency: (taskId: string, dependsOnTaskId: string) => ipcRenderer.invoke('tasks:addDependency', taskId, dependsOnTaskId),
+    removeDependency: (taskId: string, dependsOnTaskId: string) => ipcRenderer.invoke('tasks:removeDependency', taskId, dependsOnTaskId),
+    getBlocked: () => ipcRenderer.invoke('tasks:getBlocked'),
     onCreated: (cb) => createEventListener('tasks:created', cb),
     onUpdated: (cb) => createEventListener('tasks:updated', cb),
     onCompleted: (cb) => createEventListener('tasks:completed', cb),
@@ -636,6 +682,33 @@ contextBridge.exposeInMainWorld('jam', {
       rollback: (improvementId) => ipcRenderer.invoke('improvements:rollback', improvementId),
       health: () => ipcRenderer.invoke('improvements:health'),
     },
+    blackboard: {
+      listTopics: () => ipcRenderer.invoke('blackboard:listTopics'),
+      read: (topic, limit) => ipcRenderer.invoke('blackboard:read', topic, limit),
+      publish: (agentId, topic, artifact) => ipcRenderer.invoke('blackboard:publish', agentId, topic, artifact),
+    },
+  },
+
+  auth: {
+    login: (runtimeId: string) => ipcRenderer.invoke('auth:login', runtimeId),
+    setApiKey: (runtimeId: string, apiKey: string) => ipcRenderer.invoke('auth:setApiKey', runtimeId, apiKey),
+    removeApiKey: (runtimeId: string) => ipcRenderer.invoke('auth:removeApiKey', runtimeId),
+    statusAll: () => ipcRenderer.invoke('auth:statusAll'),
+    syncCredentials: () => ipcRenderer.invoke('auth:syncCredentials'),
+  },
+
+  sandbox: {
+    getTier: () => ipcRenderer.invoke('sandbox:getTier'),
+    listWorktrees: () => ipcRenderer.invoke('sandbox:listWorktrees'),
+    removeWorktree: (agentId) => ipcRenderer.invoke('sandbox:removeWorktree', agentId),
+    desktopStatus: (agentId) => ipcRenderer.invoke('sandbox:desktopStatus', agentId),
+  },
+
+  merge: {
+    status: (agentId) => ipcRenderer.invoke('merge:status', agentId),
+    preview: (agentId, targetBranch) => ipcRenderer.invoke('merge:preview', agentId, targetBranch),
+    execute: (agentId, targetBranch) => ipcRenderer.invoke('merge:execute', agentId, targetBranch),
+    abort: (agentId) => ipcRenderer.invoke('merge:abort', agentId),
   },
 } as JamAPI);
 

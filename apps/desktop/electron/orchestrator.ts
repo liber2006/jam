@@ -2,7 +2,7 @@ import { app, BrowserWindow, shell, clipboard, Notification } from 'electron';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readFile, readdir, stat, mkdir, writeFile, unlink } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { EventBus } from '@jam/eventbus';
 import {
   PtyManager,
@@ -17,6 +17,7 @@ import {
   ServiceRegistry,
 } from '@jam/agent-runtime';
 import type { IPtyManager } from '@jam/agent-runtime';
+import { BaseAgentRuntime } from '@jam/agent-runtime';
 import type { IContainerManager } from '@jam/core';
 import { randomBytes } from 'node:crypto';
 import {
@@ -27,7 +28,14 @@ import {
   ImageManager,
   HostBridge,
   AGENT_DOCKERFILE,
+  DESKTOP_STARTUP_SCRIPT,
 } from '@jam/sandbox';
+import {
+  OsSandboxedPtyManager,
+  SandboxConfigBuilder,
+  WorktreeManager,
+  MergeService,
+} from '@jam/os-sandbox';
 import {
   VoiceService,
   CommandParser,
@@ -57,6 +65,8 @@ import {
   FileImprovementStore,
   CodeImprovementEngine,
   TaskExecutor,
+  FileBlackboard,
+  TaskNegotiationHandler,
 } from '@jam/team';
 import type { ITeamExecutor } from '@jam/team';
 import { AppStore } from './storage/store';
@@ -64,6 +74,62 @@ import { loadConfig, type JamConfig, type STTProviderType, type TTSProviderType 
 
 const log = createLogger('Orchestrator');
 
+/**
+ * Build Docker context files for the agent sandbox image.
+ * Reads @jam/computer-use source from the workspace so `yarn dev` just works —
+ * no manual Docker build steps needed.
+ */
+function buildDockerContext(): Record<string, string> {
+  const files: Record<string, string> = {
+    'start-desktop.sh': DESKTOP_STARTUP_SCRIPT,
+  };
+
+  // Find computer-use package source in the workspace
+  const cuSrcDir = resolveComputerUseSrc();
+  if (!cuSrcDir) {
+    log.warn('Could not locate @jam/computer-use source — desktop agents will lack computer-use server');
+    return files;
+  }
+
+  // Production-only package.json (just the express runtime dependency)
+  files['computer-use/package.json'] = JSON.stringify({
+    name: 'computer-use',
+    private: true,
+    type: 'module',
+    dependencies: { express: '^4.21.0' },
+  }, null, 2);
+
+  // Bundle all TypeScript source files
+  try {
+    const entries = readdirSync(cuSrcDir, { recursive: true, encoding: 'utf-8' });
+    for (const entry of entries) {
+      if (typeof entry === 'string' && entry.endsWith('.ts')) {
+        files[`computer-use/src/${entry}`] = readFileSync(join(cuSrcDir, entry), 'utf-8');
+      }
+    }
+    log.info(`Bundled ${Object.keys(files).length} files for Docker build context`);
+  } catch (err) {
+    log.warn('Failed to read computer-use source files:', err);
+  }
+
+  return files;
+}
+
+/** Locate the @jam/computer-use src/ directory via workspace resolution */
+function resolveComputerUseSrc(): string | null {
+  // Try require.resolve (works with Yarn workspaces + node_modules linker)
+  try {
+    const pkgPath = require.resolve('@jam/computer-use/package.json');
+    const srcDir = join(pkgPath, '..', 'src');
+    if (existsSync(srcDir)) return srcDir;
+  } catch { /* fallback */ }
+
+  // Try relative to CWD (monorepo root)
+  const fromCwd = join(process.cwd(), 'packages', 'computer-use', 'src');
+  if (existsSync(fromCwd)) return fromCwd;
+
+  return null;
+}
 
 const DEATH_PHRASES = [
   '{name} has left the building. Permanently.',
@@ -91,6 +157,8 @@ export class Orchestrator {
   private readonly portAllocator: PortAllocator | null = null;
   private readonly docker: DockerClient | null = null;
   private readonly hostBridge: HostBridge | null = null;
+  readonly worktreeManager: WorktreeManager | null = null;
+  readonly mergeService: MergeService | null = null;
   readonly memoryStore: IMemoryStore;
   readonly brainClient: BrainClient | null = null;
   readonly appStore: AppStore;
@@ -114,6 +182,8 @@ export class Orchestrator {
   readonly teamExecutor: ITeamExecutor;
   readonly improvementStore: FileImprovementStore;
   readonly codeImprovement: CodeImprovementEngine | null = null;
+  readonly blackboard: FileBlackboard;
+  readonly negotiationHandler: TaskNegotiationHandler;
   private readonly sharedSkillsDir: string;
   private readonly imageReady: Promise<void> = Promise.resolve();
   private readonly reclaimedAgentIds: Set<string> = new Set();
@@ -139,28 +209,50 @@ export class Orchestrator {
       this.sendToRenderer('services:changed', services);
     });
 
-    // Initialize PTY manager — sandbox mode or native
-    if (this.config.sandbox.enabled) {
+    // Initialize PTY manager — tiered sandbox: none | os | docker
+    const sandboxTier = this.config.sandboxTier;
+    log.info(`Sandbox tier: ${sandboxTier}`);
+
+    if (sandboxTier === 'docker') {
+      // Docker sandbox — container always runs (services + optional agent isolation)
       const docker = new DockerClient();
       this.docker = docker;
       if (docker.isAvailable()) {
-        log.info('Docker available — enabling sandbox mode');
+        const agentExecution = this.config.sandbox.agentExecution ?? 'container';
+        log.info(`Docker available — agent execution: ${agentExecution}`);
         this.portAllocator = new PortAllocator(
           this.config.sandbox.portRangeStart,
           this.config.sandbox.portsPerAgent,
         );
         this.containerManager = new ContainerManager(docker, this.portAllocator, this.config.sandbox);
-        this.ptyManager = new SandboxedPtyManager(this.containerManager, docker);
+
+        // PTY manager: 'container' → docker exec -it, 'host' → native zsh
+        if (agentExecution === 'host') {
+          this.ptyManager = new PtyManager();
+          log.info('Semi-isolation: agent CLI runs on host, services in Docker container');
+        } else {
+          this.ptyManager = new SandboxedPtyManager(this.containerManager, docker);
+          log.info('Full isolation: agent CLI runs inside Docker container');
+
+          // Set Docker executor for one-shot execute() calls (voiceCommand, tasks).
+          // Without this, runtime.execute() spawns directly on the host, bypassing the container.
+          const cm = this.containerManager;
+          const dockerForExecute = docker;
+          BaseAgentRuntime.setDockerExecutor((agentId, command, args, env) => {
+            const containerId = cm.getContainerId(agentId);
+            if (!containerId) return null; // No container → fall back to host
+            const execArgs = dockerForExecute.execPipedArgs(containerId, [command, ...args], env);
+            return { command: 'docker', args: execArgs, cwd: '/' };
+          });
+        }
 
         // Reclaim running containers from a previous session (e.g. hot reload)
-        // Stopped/crashed containers are cleaned up; running ones are reused
         this.reclaimedAgentIds = this.containerManager.reclaimExisting();
 
-        // Ensure agent image exists — awaited by startAutoStartAgents() before launching containers
-        const imageManager = new ImageManager(docker, AGENT_DOCKERFILE);
-        // Use content-hash versioned tag so Dockerfile changes trigger automatic rebuild
+        // Ensure agent image exists — bundle computer-use source into Docker build context
+        const extraContextFiles = buildDockerContext();
+        const imageManager = new ImageManager(docker, AGENT_DOCKERFILE, extraContextFiles);
         this.config.sandbox.imageName = imageManager.resolveTag(this.config.sandbox.imageName);
-        // Throttle build progress to max 2 updates/sec — prevents flooding the renderer
         let lastProgressAt = 0;
         let pendingLine = '';
         this.imageReady = imageManager.ensureImage(this.config.sandbox.imageName, (line) => {
@@ -184,33 +276,71 @@ export class Orchestrator {
             status: 'error',
             message: `Failed to build sandbox image: ${String(err)}`,
           });
+          throw err; // Re-throw so startAutoStartAgents knows the image is NOT ready
         });
 
-        // Start host bridge — HTTP API for containerized agents to execute host operations
-        this.hostBridge = new HostBridge(this.config.sandbox.hostBridgePort, {
-          openExternal: (url) => shell.openExternal(url),
-          readClipboard: () => clipboard.readText(),
-          writeClipboard: (text) => clipboard.writeText(text),
-          openPath: (path) => shell.openPath(path),
-          showNotification: (title, body) => new Notification({ title, body }).show(),
-        });
-        const bridgeToken = randomBytes(32).toString('hex');
-        this.hostBridge.start(bridgeToken).then(({ port }) => {
-          log.info(`Host bridge listening on port ${port}`);
-          this.agentManager.setExtraEnv({
-            JAM_HOST_BRIDGE_URL: `http://host.docker.internal:${port}/bridge`,
-            JAM_HOST_BRIDGE_TOKEN: bridgeToken,
+        // Start host bridge — only needed when agent runs inside the container
+        // (host-mode agents can access host resources directly)
+        if (agentExecution === 'container') {
+          this.hostBridge = new HostBridge(this.config.sandbox.hostBridgePort, {
+            openExternal: (url) => shell.openExternal(url),
+            readClipboard: () => clipboard.readText(),
+            writeClipboard: (text) => clipboard.writeText(text),
+            openPath: (path) => shell.openPath(path),
+            showNotification: (title, body) => new Notification({ title, body }).show(),
           });
-        }).catch((err) => {
-          log.error(`Failed to start host bridge: ${String(err)}`);
-        });
+          const bridgeToken = randomBytes(32).toString('hex');
+          this.hostBridge.start(bridgeToken).then(({ port }) => {
+            log.info(`Host bridge listening on port ${port}`);
+            this.agentManager.setExtraEnv({
+              JAM_HOST_BRIDGE_URL: `http://host.docker.internal:${port}/bridge`,
+              JAM_HOST_BRIDGE_TOKEN: bridgeToken,
+            });
+          }).catch((err) => {
+            log.error(`Failed to start host bridge: ${String(err)}`);
+          });
+        }
       } else {
         log.warn('Docker not available — falling back to native execution');
         this.eventBus.emit('sandbox:unavailable', { reason: 'Docker Desktop is not running or not installed' });
         this.ptyManager = new PtyManager();
       }
+    } else if (sandboxTier === 'os') {
+      // OS-level sandbox — seatbelt (macOS) / bubblewrap (Linux)
+      const basePty = new PtyManager();
+      const configBuilder = new SandboxConfigBuilder(this.config.osSandbox);
+      const osSandboxPty = new OsSandboxedPtyManager(basePty, configBuilder);
+
+      // Initialize sandbox runtime (async, graceful fallback to plain PtyManager)
+      osSandboxPty.initialize().then(() => {
+        log.info('OS sandbox initialized');
+      }).catch((err) => {
+        log.warn(`OS sandbox init failed: ${String(err)} — commands run unsandboxed`);
+      });
+
+      this.ptyManager = osSandboxPty;
+
+      // Also set the sandbox wrapper for one-shot execute() calls via BaseAgentRuntime
+      if (this.config.osSandbox.enabled) {
+        BaseAgentRuntime.setSandboxWrapper(async (cmd: string) => {
+          // When OS sandbox is available, one-shot execute() spawns are already
+          // wrapped by OsSandboxedPtyManager. For direct child_process spawns
+          // (base-runtime execute()), we pass through — the PTY layer handles wrapping.
+          return cmd;
+        });
+        log.info('OS sandbox wrapper registered for one-shot execute()');
+      }
     } else {
+      // No sandbox — plain native execution
       this.ptyManager = new PtyManager();
+      log.info('No sandbox — agents run directly on host');
+    }
+
+    // Git worktree isolation (independent of sandbox tier)
+    if (this.config.worktree.autoCreate) {
+      this.worktreeManager = new WorktreeManager(this.config.worktree);
+      this.mergeService = new MergeService(this.worktreeManager);
+      log.info('Git worktree isolation enabled');
     }
 
     // Register runtimes
@@ -243,6 +373,8 @@ export class Orchestrator {
 
     const teamDir = join(app.getPath('userData'), 'team');
     this.taskStore = new FileTaskStore(teamDir);
+    this.blackboard = new FileBlackboard(teamDir, this.eventBus);
+    this.negotiationHandler = new TaskNegotiationHandler(this.taskStore, this.eventBus);
     this.communicationHub = new FileCommunicationHub(teamDir, this.eventBus);
     this.relationshipStore = new FileRelationshipStore(teamDir);
     this.statsStore = new FileStatsStore(teamDir);
@@ -253,16 +385,26 @@ export class Orchestrator {
 
     // Tell agents whether they're running in sandbox or on host
     if (this.containerManager) {
-      contextBuilder.setExecutionEnvironment({
-        mode: 'sandbox',
-        containerWorkdir: '/workspace',
-        hostBridgeUrl: `http://host.docker.internal:${this.config.sandbox.hostBridgePort}/bridge`,
-        mounts: [
-          { containerPath: '/workspace', description: 'Agent workspace (bind-mounted from host)' },
-          { containerPath: '/shared-skills', description: 'Shared skills directory', readOnly: true },
-          { containerPath: '/home/agent/.claude', description: 'Claude Code credentials', readOnly: true },
-        ],
-      });
+      const agentExecution = this.config.sandbox.agentExecution ?? 'container';
+      if (agentExecution === 'host') {
+        // Semi-isolation: agent runs on host, container provides services
+        contextBuilder.setExecutionEnvironment({
+          mode: 'docker-host',
+          // containerServiceUrls set dynamically in pre-start hook (per-agent port mapping)
+        });
+      } else {
+        // Full isolation: agent runs inside the container
+        contextBuilder.setExecutionEnvironment({
+          mode: 'sandbox',
+          containerWorkdir: '/workspace',
+          hostBridgeUrl: `http://host.docker.internal:${this.config.sandbox.hostBridgePort}/bridge`,
+          mounts: [
+            { containerPath: '/workspace', description: 'Agent workspace (bind-mounted from host)' },
+            { containerPath: '/shared-skills', description: 'Shared skills directory', readOnly: true },
+            { containerPath: '/home/agent/.claude', description: 'Claude Code credentials', readOnly: true },
+          ],
+        });
+      }
     } else {
       contextBuilder.setExecutionEnvironment({ mode: 'host' });
     }
@@ -275,7 +417,7 @@ export class Orchestrator {
       contextBuilder,
       taskTracker,
       (bindings) => this.appStore.resolveSecretBindings(bindings),
-      () => this.appStore.getAllSecretValues(),
+      () => [...this.appStore.getAllSecretValues(), ...this.getOAuthTokenValues()],
       sharedSkillsDir,
       this.statsStore,
     );
@@ -298,14 +440,52 @@ export class Orchestrator {
       const cm = this.containerManager;
       const pa = this.portAllocator;
 
-      // Pre-start: create container before PTY spawn
+      // Pre-start: create container before PTY spawn (both modes need the container)
+      // createAndStart() already waits for the computer-use server to be ready via
+      // waitForComputerUse() — no extra health check needed here.
+      const agentExec = this.config.sandbox.agentExecution ?? 'container';
       this.agentManager.setPreStartHook(async (agentId, profile) => {
-        await cm.createAndStart({
+        const containerInfo = await cm.createAndStart({
           agentId,
           agentName: profile.name,
           workspacePath: profile.cwd ?? join(homedir(), '.jam', 'agents', profile.name),
           sharedSkillsPath: sharedSkillsDir,
+          computerUse: profile.allowComputerUse,
         });
+
+        // When computer-use is enabled in container mode, set DISPLAY so any GUI
+        // processes (including Playwright MCP's browser) render on the virtual desktop.
+        if (profile.allowComputerUse && agentExec === 'container') {
+          profile.env = {
+            ...profile.env,
+            DISPLAY: ':99',
+          };
+          log.info(`Set DISPLAY=:99 for "${profile.name}" (computer-use container agent)`, undefined, agentId);
+        }
+
+        // In docker-host mode, update the execution environment with per-agent container info
+        // and inject the computer-use URL as an env var for the skill to reference
+        if (agentExec === 'host') {
+          const computerUseHostPort = containerInfo.portMappings.get(3100);
+          const noVncHostPort = containerInfo.portMappings.get(6080);
+          const containerName = `jam-${profile.name.toLowerCase().replace(/[^a-z0-9_.-]/g, '-')}`;
+          contextBuilder.setExecutionEnvironment({
+            mode: 'docker-host',
+            containerName,
+            containerServiceUrls: {
+              computerUse: computerUseHostPort ? `http://localhost:${computerUseHostPort}` : undefined,
+              noVnc: noVncHostPort ? `http://localhost:${noVncHostPort}` : undefined,
+            },
+          });
+
+          // Inject per-agent env vars so the skill's $JAM_COMPUTER_USE_URL resolves at runtime
+          if (computerUseHostPort) {
+            profile.env = {
+              ...profile.env,
+              JAM_COMPUTER_USE_URL: `http://localhost:${computerUseHostPort}`,
+            };
+          }
+        }
       });
 
       // Port resolver: map container ports to host ports for health checks
@@ -345,6 +525,25 @@ export class Orchestrator {
           child.unref();
           return true;
         },
+      });
+    }
+
+    // Git worktree pre-start hook — creates worktree before agent launches
+    // Note: when Docker sandbox is active, the Docker pre-start hook is already set above.
+    // Worktree isolation is independent of sandbox tier and only applies to non-Docker modes.
+    if (this.worktreeManager && !this.containerManager) {
+      const wm = this.worktreeManager;
+
+      this.agentManager.setPreStartHook(async (_agentId, profile) => {
+        if (profile.useWorktree && profile.cwd) {
+          try {
+            const info = await wm.create(_agentId, profile.name, profile.cwd);
+            profile.cwd = info.worktreePath;
+            log.info(`Worktree created for "${profile.name}" at ${info.worktreePath}`);
+          } catch (err) {
+            log.warn(`Worktree creation failed for "${profile.name}": ${String(err)}`);
+          }
+        }
       });
     }
 
@@ -469,6 +668,30 @@ export class Orchestrator {
       this.eventBus,
       (input) => this.agentManager.create(input),
     );
+
+    // Wire inbox events to blackboard and negotiation handler
+    this.eventBus.on('inbox:blackboard:publish', (data: {
+      agentId: string; topic: string; artifactType: string; content: unknown; metadata?: unknown;
+    }) => {
+      this.blackboard.publish(data.agentId, data.topic, {
+        type: data.artifactType as 'text' | 'diff' | 'json' | 'file-ref',
+        content: String(data.content),
+        metadata: data.metadata as Record<string, unknown> | undefined,
+      }).catch((err) => log.warn(`Blackboard publish failed: ${String(err)}`));
+    });
+
+    this.eventBus.on('inbox:task:negotiate', (data: {
+      agentId: string; taskId: string; action: string; reason: string;
+    }) => {
+      if (data.action === 'reassign') {
+        this.negotiationHandler.handleReassignRequest(data.taskId, data.agentId, data.reason)
+          .catch((err) => log.warn(`Task reassign failed: ${String(err)}`));
+      } else if (data.action === 'block') {
+        this.negotiationHandler.handleBlockRequest(data.taskId, data.agentId, data.reason)
+          .catch((err) => log.warn(`Task block failed: ${String(err)}`));
+      }
+    });
+
     this.teamEventHandler = new TeamEventHandler(
       this.eventBus,
       this.statsStore,
@@ -514,10 +737,24 @@ export class Orchestrator {
     const teamSkill = this.buildTeamCommunicationSkill();
     await writeFile(teamSkillPath, teamSkill, 'utf-8');
 
-    // Host bridge skill — only in sandbox mode (teaches agents how to call host operations)
-    if (this.config.sandbox.enabled && this.hostBridge) {
+    // Host bridge skill — only when agent runs inside the container (needs bridge to reach host)
+    const agentExecution = this.config.sandbox?.agentExecution ?? 'container';
+    if (this.config.sandboxTier === 'docker' && agentExecution === 'container' && this.hostBridge) {
       const bridgeSkillPath = join(dir, 'host-bridge.md');
       await writeFile(bridgeSkillPath, HOST_BRIDGE_SKILL, 'utf-8');
+    } else {
+      // Remove stale host-bridge skill if switching to host mode
+      const staleBridgePath = join(dir, 'host-bridge.md');
+      await unlink(staleBridgePath).catch(() => {});
+    }
+
+    // Computer use skill — only when Docker + computer use is globally enabled
+    if (this.config.sandboxTier === 'docker' && this.config.sandbox?.computerUse?.enabled) {
+      const computerUseSkillPath = join(dir, 'computer-use.md');
+      const skillContent = agentExecution === 'host'
+        ? buildComputerUseSkill('host')
+        : buildComputerUseSkill('container');
+      await writeFile(computerUseSkillPath, skillContent, 'utf-8');
     }
   }
 
@@ -577,6 +814,26 @@ export class Orchestrator {
   }
 
   /** Safely send IPC to renderer — guards against destroyed window during HMR */
+  /** Extract OAuth token values from credential files for redaction.
+   *  Prevents agents from leaking access/refresh tokens in their output. */
+  private getOAuthTokenValues(): string[] {
+    const tokens: string[] = [];
+    try {
+      const credPath = join(homedir(), '.claude', '.credentials.json');
+      if (existsSync(credPath)) {
+        const content = readFileSync(credPath, 'utf-8');
+        const creds = JSON.parse(content);
+        if (creds.claudeAiOauth?.accessToken) tokens.push(creds.claudeAiOauth.accessToken);
+        if (creds.claudeAiOauth?.refreshToken) tokens.push(creds.claudeAiOauth.refreshToken);
+      }
+    } catch { /* best-effort */ }
+    // Also redact any ANTHROPIC_API_KEY / OPENAI_API_KEY from process.env
+    for (const envVar of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CURSOR_API_KEY']) {
+      if (process.env[envVar]) tokens.push(process.env[envVar]!);
+    }
+    return tokens;
+  }
+
   private sendToRenderer(channel: string, data: unknown): void {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       try {
@@ -595,7 +852,7 @@ export class Orchestrator {
     this.mainWindow = win;
 
     // Send initial sandbox status so the renderer knows if it should show a loading screen
-    if (this.config.sandbox.enabled && this.containerManager) {
+    if (this.config.sandboxTier === 'docker' && this.containerManager) {
       if (this.sandboxFullyReady) {
         // Auto-start already completed before window was ready — send 'ready' immediately
         this.sendToRenderer('sandbox:progress', {
@@ -1012,7 +1269,13 @@ export class Orchestrator {
     const phase = (name: string) => log.info(`[Startup Timing] ${name} at +${Date.now() - t0}ms`);
 
     // Wait for Docker image to be ready before launching any containers
-    await this.imageReady;
+    try {
+      await this.imageReady;
+    } catch (err) {
+      log.error('Docker image build failed — cannot start agents in sandbox mode');
+      phase('imageReady (FAILED)');
+      return; // Don't attempt to start agents without a working image
+    }
     phase('imageReady');
 
     // Import agent folders from disk that aren't registered yet (e.g. created by JAM)
@@ -1207,6 +1470,7 @@ export class Orchestrator {
     // Do this BEFORE any async work so processes die even if later steps hang.
     this.agentManager.stopAll();
     this.ptyManager.killAll();
+    BaseAgentRuntime.setDockerExecutor(null);
 
     // --- Phase 2: Best-effort async cleanup (timeout-guarded) ---
     // Each operation is individually guarded so a single hang doesn't block everything.
@@ -1236,8 +1500,8 @@ export class Orchestrator {
       'service cleanup',
     );
 
-    // Stop host bridge
-    this.hostBridge?.stop().catch(() => {});
+    // Stop host bridge — await to ensure the socket is fully released
+    await this.hostBridge?.stop().catch(() => {});
 
     if (keepContainers) {
       // HMR: keep containers running — they'll be reclaimed on next startup
@@ -1587,3 +1851,110 @@ const HOST_BRIDGE_SKILL = [
   '- AppleScript: `do shell script` and keystroke simulation are blocked for security',
   '- Always check the response `success` field before assuming the operation worked',
 ].join('\n');
+
+/** Build computer-use skill with the correct API URL based on execution mode.
+ *  Container mode: 127.0.0.1:3100 (loopback inside Docker).
+ *  Host mode: uses $JAM_COMPUTER_USE_URL env var (set per-agent with the mapped host port). */
+function buildComputerUseSkill(mode: 'container' | 'host'): string {
+  const isContainer = mode === 'container';
+  // In container mode: hardcoded loopback. In host mode: env var resolved at runtime.
+  const baseUrl = isContainer ? '127.0.0.1:3100' : '$JAM_COMPUTER_USE_URL';
+
+  const envPreamble = isContainer
+    ? [
+        'IMPORTANT: You are running inside an isolated Docker container (Ubuntu Linux).',
+        'Your Bash tool executes commands INSIDE the container — not on the host machine.',
+        'You have your own virtual Linux desktop with a display server, window manager, and browser.',
+        'For ALL browser, GUI, desktop, screenshot, and visual tasks, use the HTTP API below.',
+        'Do NOT use MCP Playwright tools, host bridge openExternal, or any host-side browser.',
+        `Those operate on the HOST machine — your desktop is at ${baseUrl} inside your sandbox.`,
+      ].join('\n')
+    : [
+        'You have access to a virtual Linux desktop running in a Docker container.',
+        'Your Bash tool executes on the HOST machine — the desktop runs in a container.',
+        'The computer-use API is available at the URL in $JAM_COMPUTER_USE_URL.',
+        'For ALL browser, GUI, desktop, screenshot, and visual tasks, use the HTTP API below.',
+        'Do NOT use MCP Playwright tools or host browser — use the virtual desktop API.',
+      ].join('\n');
+
+  return [
+    '---',
+    'name: computer-use',
+    'description: Control the virtual desktop — screenshots, clicks, typing, browser automation',
+    'triggers: screenshot, click, screen, browser, desktop, window, type text, scroll, gui, ui, button, menu, navigate, launch, computer use, automate, observe, open, url, website, web, page, site, yahoo, google, search',
+    'alwaysInject: true',
+    '---',
+    '',
+    '# Computer Use — Virtual Desktop',
+    '',
+    envPreamble,
+    '',
+    `Control the virtual desktop via HTTP API at ${baseUrl}.`,
+    '',
+    '## Quick Reference',
+    '',
+    '### Screenshots (IMPORTANT)',
+    'To take a screenshot and view it, always save as a real image file using the /raw endpoint:',
+    '```bash',
+    `curl -s ${baseUrl}/screenshot/raw -o /tmp/screen.png`,
+    '```',
+    'Then read the image file to see it. The /raw endpoint returns actual PNG bytes.',
+    '',
+    'For browser-only screenshots:',
+    '```bash',
+    `curl -s ${baseUrl}/browser/screenshot/raw -o /tmp/browser.png`,
+    '```',
+    '',
+    'For smaller screenshots (recommended), use JPEG with quality parameter:',
+    '```bash',
+    `curl -s "${baseUrl}/screenshot/raw?format=jpeg&quality=60" -o /tmp/screen.jpg`,
+    '```',
+    '',
+    'NOTE: The non-raw endpoints (/screenshot, /browser/screenshot) return JSON with base64 data.',
+    'Do NOT pipe those to a file — the file will contain JSON text, not image bytes.',
+    '',
+    '### Observe (full screen state as JSON)',
+    '```bash',
+    `curl -s ${baseUrl}/observe | jq`,
+    `curl -s ${baseUrl}/status | jq`,
+    '```',
+    '',
+    '### Click & Type',
+    '```bash',
+    `curl -s -X POST ${baseUrl}/click -H 'Content-Type: application/json' -d '{"x":500,"y":300}'`,
+    `curl -s -X POST ${baseUrl}/type -H 'Content-Type: application/json' -d '{"text":"hello world"}'`,
+    `curl -s -X POST ${baseUrl}/key -H 'Content-Type: application/json' -d '{"key":"ctrl+s"}'`,
+    `curl -s -X POST ${baseUrl}/scroll -H 'Content-Type: application/json' -d '{"direction":"down","amount":3}'`,
+    '```',
+    '',
+    '### Windows',
+    '```bash',
+    `curl -s ${baseUrl}/windows | jq`,
+    `curl -s -X POST ${baseUrl}/focus -H 'Content-Type: application/json' -d '{"title":"Chromium"}'`,
+    `curl -s -X POST ${baseUrl}/launch -H 'Content-Type: application/json' -d '{"command":"xterm"}'`,
+    '```',
+    '',
+    '### Browser (Playwright)',
+    '```bash',
+    `curl -s -X POST ${baseUrl}/browser/launch -H 'Content-Type: application/json' -d '{"url":"https://example.com"}'`,
+    `curl -s ${baseUrl}/browser/snapshot | jq`,
+    `curl -s -X POST ${baseUrl}/browser/click -H 'Content-Type: application/json' -d '{"text":"Sign in"}'`,
+    `curl -s -X POST ${baseUrl}/browser/type -H 'Content-Type: application/json' -d '{"selector":"#email","text":"user@example.com"}'`,
+    `curl -s -X POST ${baseUrl}/browser/eval -H 'Content-Type: application/json' -d '{"expression":"document.title"}'`,
+    `curl -s ${baseUrl}/browser/screenshot/raw -o /tmp/browser.png`,
+    '```',
+    '',
+    '### Wait for changes',
+    '```bash',
+    `curl -s -X POST ${baseUrl}/wait -H 'Content-Type: application/json' -d '{"change":true,"timeout":5}'`,
+    '```',
+    '',
+    '## Tips',
+    '- ALWAYS use /screenshot/raw or /browser/screenshot/raw when saving screenshots to files',
+    '- Use /observe to see the full screen state (JSON with windows list + screenshot)',
+    '- Browser commands use Playwright (fastest, most reliable for web automation)',
+    '- For native Linux GUI apps, use /click + /type + /key with coordinates from /screenshot',
+    '- All command responses are JSON: {"success": true, "data": {...}, "duration_ms": N}',
+  ].join('\n');
+}
+

@@ -27,6 +27,7 @@ export interface AgentEntry {
     autoStart?: boolean;
     allowFullAccess?: boolean;
     allowInterrupts?: boolean;
+    allowComputerUse?: boolean;
     cwd?: string;
     secretBindings?: Array<{ secretId: string; envVarName: string }>;
     isSystem?: boolean;

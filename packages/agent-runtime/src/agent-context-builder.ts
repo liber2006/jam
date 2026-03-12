@@ -20,6 +20,8 @@ export interface SkillDefinition {
   description: string;
   triggers: string[];
   body: string;
+  /** When true, skill is injected at PTY startup — no trigger match needed */
+  alwaysInject?: boolean;
 }
 
 const MAX_CONVERSATION_HISTORY = 20;
@@ -29,14 +31,18 @@ const SKILLS_DIR = 'skills';
 const SOUL_FILE = 'SOUL.md';
 
 export interface ExecutionEnvironment {
-  /** 'sandbox' = Docker container, 'host' = native on user's machine */
-  mode: 'sandbox' | 'host';
+  /** 'sandbox' = agent inside Docker, 'host' = no sandbox, 'docker-host' = agent on host with Docker services */
+  mode: 'sandbox' | 'host' | 'docker-host';
   /** Container workspace path (e.g. /workspace) — only relevant in sandbox mode */
   containerWorkdir?: string;
   /** Host bridge URL for sandbox agents to call host operations */
   hostBridgeUrl?: string;
   /** Paths mounted into the container */
   mounts?: { containerPath: string; description: string; readOnly?: boolean }[];
+  /** For docker-host mode: URLs to reach container services from the host */
+  containerServiceUrls?: { computerUse?: string; noVnc?: string };
+  /** Docker container name (e.g. "jam-charlie") — for docker-host mode */
+  containerName?: string;
 }
 
 export class AgentContextBuilder {
@@ -195,9 +201,10 @@ export class AgentContextBuilder {
     const agentNames = new Set(agentSkills.map(s => s.name));
     const merged = [...agentSkills, ...sharedSkills.filter(s => !agentNames.has(s.name))];
 
-    // Filter by trigger match
+    // Filter by trigger match — alwaysInject skills are included regardless
     const lowerCommand = commandText.toLowerCase();
     return merged.filter(skill =>
+      skill.alwaysInject ||
       skill.triggers.some(trigger => lowerCommand.includes(trigger.toLowerCase()))
     );
   }
@@ -255,6 +262,7 @@ export class AgentContextBuilder {
       description: meta.description || '',
       triggers: meta.triggers.split(',').map(t => t.trim()).filter(Boolean),
       body: body.trim(),
+      alwaysInject: meta.alwaysInject === 'true',
     };
   }
 
@@ -294,18 +302,19 @@ export class AgentContextBuilder {
     sections.push(`Your name is ${profile.name}. When asked who you are, respond as ${profile.name}.`);
 
     // 2. Workspace + Execution Environment
-    if (profile.cwd) {
+    if (this.executionEnv.mode === 'sandbox') {
+      // In sandbox mode, show the CONTAINER path — never the host path (it doesn't exist in the container)
+      const containerWorkdir = this.executionEnv.containerWorkdir ?? '/workspace';
       sections.push(
-        `Your workspace directory is: ${profile.cwd}`,
+        `Your workspace directory is: ${containerWorkdir}`,
         'All files you create should be placed in this directory unless the user specifies otherwise.',
       );
-    }
 
-    if (this.executionEnv.mode === 'sandbox') {
       const envLines = [
         '--- EXECUTION ENVIRONMENT ---',
-        'You are running inside a Docker container (sandboxed environment).',
-        `Your working directory inside the container is: ${this.executionEnv.containerWorkdir ?? '/workspace'}`,
+        'You are running inside a Docker container (Ubuntu Linux).',
+        'Your Bash tool and all commands execute INSIDE this container — not on the host.',
+        `Your working directory is: ${containerWorkdir}`,
         'Your workspace is bind-mounted from the host — file changes persist.',
       ];
       if (this.executionEnv.mounts?.length) {
@@ -324,7 +333,38 @@ export class AgentContextBuilder {
       }
       envLines.push('--- END EXECUTION ENVIRONMENT ---');
       sections.push(envLines.join('\n'));
+    } else if (this.executionEnv.mode === 'docker-host') {
+      // Agent runs on host, but has a Docker container running services
+      if (profile.cwd) {
+        sections.push(
+          `Your workspace directory is: ${profile.cwd}`,
+          'All files you create should be placed in this directory unless the user specifies otherwise.',
+        );
+      }
+      const envLines = [
+        '--- EXECUTION ENVIRONMENT ---',
+        'You are running on the host machine with Docker container services.',
+        'Your Bash tool executes on the host natively.',
+      ];
+      if (this.executionEnv.containerName) {
+        envLines.push(
+          `Docker container "${this.executionEnv.containerName}" is running services for you.`,
+          `To run commands inside the container: docker exec ${this.executionEnv.containerName} <command>`,
+        );
+      }
+      if (this.executionEnv.containerServiceUrls?.computerUse) {
+        envLines.push(`Virtual desktop API: ${this.executionEnv.containerServiceUrls.computerUse}`);
+      }
+      envLines.push('--- END EXECUTION ENVIRONMENT ---');
+      sections.push(envLines.join('\n'));
     } else {
+      // Plain host mode — no Docker at all
+      if (profile.cwd) {
+        sections.push(
+          `Your workspace directory is: ${profile.cwd}`,
+          'All files you create should be placed in this directory unless the user specifies otherwise.',
+        );
+      }
       sections.push(
         '--- EXECUTION ENVIRONMENT ---',
         'You are running natively on the host machine (no sandbox).',

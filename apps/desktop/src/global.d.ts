@@ -365,6 +365,9 @@ export interface JamAPI {
     cancel: (taskId: string) => Promise<{ success: boolean; error?: string }>;
     getPaused: () => Promise<boolean>;
     setPaused: (paused: boolean) => Promise<{ success: boolean; error?: string }>;
+    addDependency: (taskId: string, dependsOnTaskId: string) => Promise<{ success: boolean; task?: Record<string, unknown>; error?: string }>;
+    removeDependency: (taskId: string, dependsOnTaskId: string) => Promise<{ success: boolean; task?: Record<string, unknown>; error?: string }>;
+    getBlocked: () => Promise<Array<Record<string, unknown>>>;
     createRecurring: (input: {
       title: string;
       description: string;
@@ -448,11 +451,92 @@ export interface JamAPI {
       rollback: (improvementId: string) => Promise<{ success: boolean; error?: string }>;
       health: () => Promise<{ healthy: boolean; lastCheck: string; issues: string[] }>;
     };
+    blackboard: {
+      listTopics: () => Promise<string[]>;
+      read: (topic: string, limit?: number) => Promise<Array<{
+        id: string;
+        agentId: string;
+        topic: string;
+        type: string;
+        content: string;
+        timestamp: string;
+        metadata?: Record<string, unknown>;
+      }>>;
+      publish: (agentId: string, topic: string, artifact: {
+        type: string;
+        content: string;
+        metadata?: Record<string, unknown>;
+      }) => Promise<{ success: boolean; artifact?: Record<string, unknown>; error?: string }>;
+    };
   };
+
+  auth: {
+    login: (runtimeId: string) => Promise<{ success: boolean; error?: string }>;
+    setApiKey: (runtimeId: string, apiKey: string) => Promise<{ success: boolean; envVar?: string; error?: string }>;
+    removeApiKey: (runtimeId: string) => Promise<{ success: boolean }>;
+    statusAll: () => Promise<Array<{
+      runtimeId: string;
+      displayName: string;
+      authType: string;
+      authEnvVar?: string;
+      hasAuthCommand: boolean;
+      authenticated: boolean;
+      expired?: boolean;
+      hasApiKey: boolean;
+    }>>;
+    syncCredentials: () => Promise<{ success: boolean; error?: string; message?: string }>;
+  };
+
+  sandbox: {
+    getTier: () => Promise<string>;
+    listWorktrees: () => Promise<Array<{
+      agentId: string;
+      agentName: string;
+      worktreePath: string;
+      branch: string;
+      repoPath: string;
+    }>>;
+    removeWorktree: (agentId: string) => Promise<{ success: boolean; error?: string }>;
+    desktopStatus: (agentId: string) => Promise<{ available: boolean; noVncPort?: number; resolution?: string }>;
+  };
+
+  merge: {
+    status: (agentId: string) => Promise<string>;
+    preview: (agentId: string, targetBranch?: string) => Promise<{
+      agentId: string;
+      branch: string;
+      filesChanged: Array<{ path: string; status: string; diff: string }>;
+      conflictsDetected: boolean;
+    }>;
+    execute: (agentId: string, targetBranch?: string) => Promise<{
+      success: boolean;
+      mergedFiles: number;
+      error?: string;
+    }>;
+    abort: (agentId: string) => Promise<void>;
+  };
+}
+
+/** Electron <webview> element — extends HTMLElement with Electron-specific attributes */
+interface HTMLWebViewElement extends HTMLElement {
+  src: string;
+  allowpopups: string;
+  partition: string;
 }
 
 declare global {
   interface Window {
     jam: JamAPI;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLWebViewElement>, HTMLWebViewElement> & {
+        src?: string;
+        allowpopups?: string;
+        partition?: string;
+      };
+    }
   }
 }

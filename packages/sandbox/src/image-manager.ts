@@ -20,9 +20,15 @@ export class ImageManager implements IImageManager {
   constructor(
     private readonly docker: IDockerClient,
     private readonly dockerfileContent: string,
+    /** Extra files to include in the Docker build context (path → content) */
+    private readonly extraContextFiles: Record<string, string> = {},
   ) {
-    // Short hash of Dockerfile content — used to detect when image needs rebuilding
-    this.contentHash = createHash('sha256').update(dockerfileContent).digest('hex').slice(0, 8);
+    // Hash includes Dockerfile + all extra files so changes trigger rebuild
+    const hash = createHash('sha256').update(dockerfileContent);
+    for (const [path, content] of Object.entries(extraContextFiles).sort()) {
+      hash.update(path).update(content);
+    }
+    this.contentHash = hash.digest('hex').slice(0, 8);
   }
 
   /**
@@ -48,10 +54,16 @@ export class ImageManager implements IImageManager {
       return;
     }
 
-    // Write Dockerfile to a temp build context directory
+    // Write Dockerfile + extra files to a temp build context directory
     const buildCtx = join(tmpdir(), `jam-docker-build-${Date.now()}`);
     mkdirSync(buildCtx, { recursive: true });
     writeFileSync(join(buildCtx, 'Dockerfile'), this.dockerfileContent, 'utf-8');
+
+    for (const [filePath, content] of Object.entries(this.extraContextFiles)) {
+      const fullPath = join(buildCtx, filePath);
+      mkdirSync(join(fullPath, '..'), { recursive: true });
+      writeFileSync(fullPath, content, 'utf-8');
+    }
 
     log.info(`Image ${versionedTag} not found — building...`);
     try {

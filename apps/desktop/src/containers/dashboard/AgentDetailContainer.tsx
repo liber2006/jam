@@ -26,6 +26,20 @@ export function AgentDetailContainer({ agentId }: AgentDetailContainerProps) {
   const { stats, relationships } = useTeamStats();
   const { tasks } = useTasks();
   const [services, setServices] = useState<ServiceEntry[]>([]);
+  const [noVncUrl, setNoVncUrl] = useState<string | null>(null);
+
+  // Fetch desktop status (noVNC URL) for computer-use agents
+  // Re-check when agent status changes (container may not be ready on first render)
+  const agentStatus = agent?.status;
+  useEffect(() => {
+    window.jam.sandbox.desktopStatus(agentId).then((status) => {
+      if (status.available && status.noVncPort) {
+        setNoVncUrl(`http://localhost:${status.noVncPort}`);
+      } else {
+        setNoVncUrl(null);
+      }
+    }).catch(() => setNoVncUrl(null));
+  }, [agentId, agentStatus]);
 
   const refreshServices = useCallback(async () => {
     try {
@@ -102,6 +116,17 @@ export function AgentDetailContainer({ agentId }: AgentDetailContainerProps) {
     [agents],
   );
 
+  // Derive activity heatmap: ISO date → completed task count (12 weeks)
+  const activityHeatmap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const t of Object.values(useAppStore.getState().tasks)) {
+      if (t.assignedTo !== agentId || t.status !== 'completed' || !t.completedAt) continue;
+      const dateKey = t.completedAt.slice(0, 10); // ISO date "YYYY-MM-DD"
+      map[dateKey] = (map[dateKey] ?? 0) + 1;
+    }
+    return map;
+  }, [agentId, tasks]);
+
   // Derive activity log from tasks involving this agent
   const activity = useMemo(() => {
     const allTasks = Object.values(useAppStore.getState().tasks);
@@ -170,12 +195,15 @@ export function AgentDetailContainer({ agentId }: AgentDetailContainerProps) {
       services={services}
       relationships={agentRelationships}
       agents={agentMap}
+      activityHeatmap={activityHeatmap}
       onTriggerReflection={triggerReflection}
       onCancelTask={(taskId) => window.jam.tasks.cancel(taskId)}
       onStopService={handleStopService}
       onRestartService={handleRestartService}
       onOpenService={handleOpenService}
       isReflecting={isReflecting}
+      noVncUrl={noVncUrl}
+      isAgentRunning={agent.status === 'running' || agent.status === 'busy'}
     />
   );
 }

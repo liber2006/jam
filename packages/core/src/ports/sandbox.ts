@@ -15,6 +15,8 @@ export interface CreateContainerOptions {
   sharedSkillsPath?: string;
   credentialMounts?: Array<{ hostPath: string; containerPath: string }>;
   env?: Record<string, string>;
+  /** Enable virtual desktop (Xvfb + computer-use server + noVNC) in this container */
+  computerUse?: boolean;
 }
 
 /** Manages Docker container lifecycle for agent sandboxing */

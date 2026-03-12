@@ -25,6 +25,14 @@ export interface CreateContainerArgs {
   workdir: string;
   env?: Record<string, string>;
   command: string[];
+  /** Path to seccomp profile JSON file */
+  seccompProfile?: string;
+  /** Docker network name to attach to */
+  network?: string;
+  /** Disk quota in MB (requires overlay2 storage driver) */
+  diskQuotaMb?: number;
+  /** Shared memory size in MB (default Docker: 64MB, too small for Chromium) */
+  shmSizeMb?: number;
 }
 
 export interface ContainerListEntry {
@@ -136,6 +144,26 @@ export class DockerClient implements IDockerClient {
     cmdArgs.push('--memory', `${args.memoryMb}m`);
     cmdArgs.push('--pids-limit', String(args.pidsLimit));
 
+    // Seccomp profile — restrict dangerous syscalls
+    if (args.seccompProfile) {
+      cmdArgs.push('--security-opt', `seccomp=${args.seccompProfile}`);
+    }
+
+    // Network — attach to a specific Docker network
+    if (args.network) {
+      cmdArgs.push('--network', args.network);
+    }
+
+    // Disk quota (requires overlay2 storage driver; fail gracefully)
+    if (args.diskQuotaMb && args.diskQuotaMb > 0) {
+      cmdArgs.push('--storage-opt', `size=${args.diskQuotaMb}m`);
+    }
+
+    // Shared memory — Chromium needs >64MB (Docker default) to avoid crashes
+    if (args.shmSizeMb && args.shmSizeMb > 0) {
+      cmdArgs.push('--shm-size', `${args.shmSizeMb}m`);
+    }
+
     // Bind-mount volumes
     for (const vol of args.volumes) {
       const mode = vol.readOnly ? ':ro' : '';
@@ -207,6 +235,18 @@ export class DockerClient implements IDockerClient {
       });
     } catch {
       log.warn(`Failed to remove container ${id.slice(0, 12)}`);
+    }
+  }
+
+  /** Remove a named Docker volume (best-effort) */
+  removeVolume(name: string): void {
+    try {
+      execFileSync(this.docker, ['volume', 'rm', '-f', name], {
+        timeout: 10_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch {
+      log.warn(`Failed to remove volume ${name}`);
     }
   }
 

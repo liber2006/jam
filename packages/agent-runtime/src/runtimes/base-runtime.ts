@@ -22,6 +22,35 @@ const log = createLogger('BaseAgentRuntime');
  * Subclasses override hooks to customize args, env, input, output parsing.
  */
 export abstract class BaseAgentRuntime implements IAgentRuntime {
+  /**
+   * Optional OS-level sandbox wrapper for one-shot execute() spawns.
+   * Set by the orchestrator when sandboxTier is 'os'.
+   * Transforms a command string through seatbelt/bubblewrap.
+   */
+  private static sandboxWrapper: ((cmd: string) => Promise<string>) | null = null;
+
+  static setSandboxWrapper(wrapper: ((cmd: string) => Promise<string>) | null): void {
+    BaseAgentRuntime.sandboxWrapper = wrapper;
+  }
+
+  /**
+   * Optional Docker executor for one-shot execute() spawns in container mode.
+   * Set by the orchestrator when sandboxTier is 'docker' and agentExecution is 'container'.
+   * Transforms command + args + env into a `docker exec` invocation for the agent's container.
+   *
+   * Returns null if the agent has no container (graceful fallback to host execution).
+   */
+  private static dockerExecutor: ((
+    agentId: string,
+    command: string,
+    args: string[],
+    env: Record<string, string>,
+  ) => { command: string; args: string[]; cwd: string } | null) | null = null;
+
+  static setDockerExecutor(executor: typeof BaseAgentRuntime.dockerExecutor): void {
+    BaseAgentRuntime.dockerExecutor = executor;
+  }
+
   abstract readonly runtimeId: string;
   abstract readonly metadata: RuntimeMetadata;
 
@@ -56,6 +85,9 @@ export abstract class BaseAgentRuntime implements IAgentRuntime {
   /**
    * Spawn a child process. Extracted as a hook so sandboxed runtimes can
    * override to route through `docker exec` instead.
+   *
+   * When an OS-level sandbox wrapper is set (via setSandboxWrapper),
+   * the command is automatically wrapped through seatbelt/bubblewrap.
    */
   protected spawnProcess(
     command: string,
@@ -69,14 +101,55 @@ export abstract class BaseAgentRuntime implements IAgentRuntime {
     });
   }
 
+  /**
+   * Wrap a command through the OS sandbox if available.
+   * Called from execute() before spawnProcess().
+   */
+  private static async maybeSandboxCommand(
+    command: string,
+    args: string[],
+  ): Promise<{ command: string; args: string[] }> {
+    if (!BaseAgentRuntime.sandboxWrapper) return { command, args };
+
+    try {
+      const fullCmd = [command, ...args].join(' ');
+      const wrappedCmd = await BaseAgentRuntime.sandboxWrapper(fullCmd);
+      const shell = process.env.SHELL || '/bin/zsh';
+      return { command: shell, args: ['-c', wrappedCmd] };
+    } catch (err) {
+      log.warn(`OS sandbox wrapping failed: ${String(err)}. Proceeding unsandboxed.`);
+      return { command, args };
+    }
+  }
+
   /** Concrete execute() — shared lifecycle across all runtimes */
   async execute(profile: AgentProfile, text: string, options?: ExecutionOptions): Promise<ExecutionResult> {
-    const command = this.getCommand();
-    const args = this.buildExecuteArgs(profile, options, text);
-    const env = buildCleanEnv({ ...this.buildExecuteEnv(profile, options), ...options?.env });
-    const cwd = options?.cwd ?? profile.cwd ?? process.env.HOME ?? '/';
+    const rawCommand = this.getCommand();
+    const rawArgs = this.buildExecuteArgs(profile, options, text);
+    // Runtime-specific env vars (NOT merged with host process.env yet)
+    const runtimeEnv = { ...this.buildExecuteEnv(profile, options), ...options?.env };
+    let cwd = options?.cwd ?? profile.cwd ?? process.env.HOME ?? '/';
 
-    log.info(`Executing: ${command} ${args.join(' ').slice(0, 80)}`, undefined, profile.id);
+    // Apply Docker container wrapping if configured (takes priority over OS sandbox)
+    let command: string;
+    let args: string[];
+    let env: Record<string, string>;
+    const dockerWrapped = BaseAgentRuntime.dockerExecutor?.(profile.id, rawCommand, rawArgs, runtimeEnv);
+    if (dockerWrapped) {
+      command = dockerWrapped.command;
+      args = dockerWrapped.args;
+      cwd = dockerWrapped.cwd;
+      // For Docker exec: use minimal host env (docker binary just needs PATH).
+      // The runtime-specific vars are already passed as -e flags by the executor.
+      env = buildCleanEnv({ TERM: 'xterm-256color' });
+      log.info(`Docker-wrapped execute: ${command} ${args.join(' ').slice(0, 120)}`, undefined, profile.id);
+    } else {
+      // Host execution: merge runtime env with host process.env
+      env = buildCleanEnv(runtimeEnv);
+      // Apply OS-level sandbox wrapping if configured
+      ({ command, args } = await BaseAgentRuntime.maybeSandboxCommand(rawCommand, rawArgs));
+      log.info(`Executing: ${command} ${args.join(' ').slice(0, 80)}`, undefined, profile.id);
+    }
 
     return new Promise((resolve) => {
       const child = this.spawnProcess(command, args, { cwd, env });
@@ -116,8 +189,13 @@ export abstract class BaseAgentRuntime implements IAgentRuntime {
       });
 
       child.stderr!.on('data', (chunk: Buffer) => {
+        const chunkStr = chunk.toString();
         if (stderr.length < MAX_OUTPUT) {
-          stderr += chunk.toString();
+          stderr += chunkStr;
+        }
+        // Log stderr in Docker mode for debugging container exec failures
+        if (BaseAgentRuntime.dockerExecutor && chunkStr.trim()) {
+          log.debug(`Docker stderr: ${chunkStr.trim().slice(0, 200)}`, undefined, profile.id);
         }
       });
 
