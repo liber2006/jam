@@ -89,15 +89,16 @@ function patternToHuman(pattern: ScheduleEntry['pattern']): string {
     const parts = pattern.cron.trim().split(/\s+/);
     if (parts.length !== 5) return pattern.cron;
     const [min, hr, , , dow] = parts;
-    if (min !== '*' && hr !== '*' && dow === '*') {
-      return `Daily at ${hr.padStart(2, '0')}:${min.padStart(2, '0')}`;
-    }
+    // Check step patterns first (*/N) before generic daily/weekly
+    if (min === '0' && hr.startsWith('*/')) return `Every ${hr.slice(2)}h`;
+    if (min.startsWith('*/')) return `Every ${min.slice(2)}m`;
     if (min !== '*' && hr !== '*' && dow !== '*') {
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       return `${days[parseInt(dow, 10)] ?? dow} at ${hr.padStart(2, '0')}:${min.padStart(2, '0')}`;
     }
-    if (min === '0' && hr.startsWith('*/')) return `Every ${hr.slice(2)} hours`;
-    if (min.startsWith('*/')) return `Every ${min.slice(2)} minutes`;
+    if (min !== '*' && hr !== '*' && dow === '*') {
+      return `Daily at ${hr.padStart(2, '0')}:${min.padStart(2, '0')}`;
+    }
     return pattern.cron;
   }
   if (pattern.intervalMs) {
@@ -127,6 +128,12 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** Check if lastRun was just seeded (set at creation time, not an actual run) */
+function wasSeeded(lastRun: string | null, createdAt: string): boolean {
+  if (!lastRun) return false;
+  return Math.abs(new Date(lastRun).getTime() - new Date(createdAt).getTime()) < 5000;
+}
+
 function timeUntil(date: Date): string {
   const diff = date.getTime() - Date.now();
   if (diff <= 0) return 'Now';
@@ -151,10 +158,13 @@ function computeNextRun(pattern: ScheduleEntry['pattern'], lastRun: string | nul
     return timeUntil(next);
   }
 
-  // Cron-based: brute-force find next matching minute
+  // Cron-based: find next matching minute from now
   if (pattern.cron) {
     const next = nextCronMatch(pattern.cron);
-    return next ? timeUntil(next) : '—';
+    if (!next) return '—';
+    // If overdue (next is in the past relative to lastRun), show "Due now"
+    if (next.getTime() <= Date.now()) return 'Due now';
+    return timeUntil(next);
   }
 
   // Legacy hour/minute pattern
@@ -506,7 +516,7 @@ export function ScheduleList() {
               >
                 <span className="truncate font-medium">{s.name}</span>
                 <span className="text-zinc-400">{patternToHuman(s.pattern)}</span>
-                <span className="text-zinc-500">{timeAgo(s.lastRun)}</span>
+                <span className="text-zinc-500">{wasSeeded(s.lastRun, s.createdAt) ? 'Not yet' : timeAgo(s.lastRun)}</span>
                 <span className="text-zinc-400">{computeNextRun(s.pattern, s.lastRun, s.enabled)}</span>
                 <span>
                   <span

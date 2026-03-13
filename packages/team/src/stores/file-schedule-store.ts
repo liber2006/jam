@@ -64,7 +64,7 @@ export class FileScheduleStore {
 
   async update(
     id: string,
-    updates: Partial<Pick<PersistedSchedule, 'pattern' | 'enabled' | 'lastRun' | 'name'>>,
+    updates: Partial<Pick<PersistedSchedule, 'pattern' | 'enabled' | 'lastRun' | 'name' | 'taskTemplate'>>,
   ): Promise<PersistedSchedule> {
     await this.ensureLoaded();
 
