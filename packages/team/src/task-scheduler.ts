@@ -249,6 +249,16 @@ export class TaskScheduler {
     template: Omit<Task, 'id' | 'createdAt' | 'status'>,
     now: Date,
   ): Promise<void> {
+    // Skip if an active task with the same title already exists (prevents accumulation)
+    const active = await this.taskStore.list({ status: 'pending' });
+    const assigned = await this.taskStore.list({ status: 'assigned' });
+    const running = await this.taskStore.list({ status: 'running' });
+    const allActive = [...active, ...assigned, ...running];
+    if (allActive.some((t) => t.title === template.title)) {
+      log.debug(`Skipping "${template.title}" — active task with same title exists`);
+      return;
+    }
+
     const isSystemTask = template.source === 'system';
     const task = await this.taskStore.create({
       ...template,

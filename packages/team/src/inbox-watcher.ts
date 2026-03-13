@@ -186,6 +186,33 @@ export class InboxWatcher {
 
           // `from` is the sender agent ID; falls back to inbox owner
           const sender = request.from || agentId;
+          const tags = request.tags ?? [];
+
+          // Task-result entries are completion notifications — store as completed,
+          // do NOT create executable tasks (prevents reply ping-pong loops)
+          if (tags.includes('task-result')) {
+            const task = await this.taskStore.create({
+              title,
+              description,
+              status: 'completed',
+              priority: (request.priority as 'low' | 'normal' | 'high' | 'critical') ?? 'normal',
+              source: 'agent',
+              createdBy: sender,
+              assignedTo: agentId,
+              createdAt: new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+              tags,
+            });
+            log.info(`Inbox notification from ${sender} → ${agentId}: "${title}" (stored as completed)`);
+            this.eventBus.emit('task:resultReady', {
+              taskId: task.id,
+              agentId: sender,
+              title,
+              text: description.slice(0, 500),
+              success: !title.startsWith('[Failed]'),
+            });
+            continue;
+          }
 
           // assignedTo defaults to inbox owner — always 'assigned' so TaskExecutor picks it up
           const assignee = request.assignedTo || agentId;
@@ -198,7 +225,7 @@ export class InboxWatcher {
             createdBy: sender,
             assignedTo: assignee,
             createdAt: new Date().toISOString(),
-            tags: request.tags ?? [],
+            tags,
           });
 
           this.eventBus.emit(Events.TASK_CREATED, { task });

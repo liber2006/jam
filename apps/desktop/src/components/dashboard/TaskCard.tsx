@@ -20,6 +20,7 @@ interface TaskCardProps {
   onDelete?: (taskId: string) => void;
   onCancel?: (taskId: string) => void;
   onAssign?: (taskId: string, agentId: string) => void;
+  onViewOutput?: (agentId: string) => void;
 }
 
 const priorityStyles: Record<string, string> = {
@@ -35,7 +36,7 @@ const statusStyles: Record<string, string> = {
   cancelled: 'bg-zinc-700 text-zinc-400',
 };
 
-export const TaskCard = React.memo(function TaskCard({ task, agentName, agentColor, agents, onDelete, onCancel, onAssign }: TaskCardProps) {
+export const TaskCard = React.memo(function TaskCard({ task, agentName, agentColor, agents, onDelete, onCancel, onAssign, onViewOutput }: TaskCardProps) {
   const isRunning = task.status === 'running';
   const isDone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
   const [showAssign, setShowAssign] = useState(false);
@@ -193,18 +194,33 @@ export const TaskCard = React.memo(function TaskCard({ task, agentName, agentCol
             </svg>
             Running {formatElapsed(task.startedAt)}
           </div>
-          {onCancel && (
-            <button
-              onClick={() => onCancel(task.id)}
-              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-              title="Stop this task"
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-              Stop
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {onViewOutput && task.assignedTo && (
+              <button
+                onClick={() => onViewOutput(task.assignedTo!)}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-zinc-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                title="View agent output"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                Output
+              </button>
+            )}
+            {onCancel && (
+              <button
+                onClick={() => onCancel(task.id)}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Stop this task"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+                Stop
+              </button>
+            )}
+          </div>
         </div>
       )}
 

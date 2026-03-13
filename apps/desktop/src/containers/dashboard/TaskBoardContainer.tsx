@@ -34,6 +34,12 @@ export function TaskBoardContainer() {
     await window.jam.tasks.cancel(taskId);
   }, []);
 
+  const setThreadAgent = useAppStore((s) => s.setThreadAgent);
+
+  const handleViewOutput = useCallback((agentId: string) => {
+    setThreadAgent(agentId);
+  }, [setThreadAgent]);
+
   const handleTogglePaused = useCallback(async () => {
     const next = !paused;
     const result = await window.jam.tasks.setPaused(next);
@@ -59,6 +65,7 @@ export function TaskBoardContainer() {
       onDelete={deleteTask}
       onBulkDelete={bulkDeleteTasks}
       onCancel={handleCancelTask}
+      onViewOutput={handleViewOutput}
     />
   );
 }

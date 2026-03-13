@@ -21,6 +21,7 @@ interface TaskBoardProps {
   onDelete: (taskId: string) => void;
   onBulkDelete: (taskIds: string[]) => void;
   onCancel?: (taskId: string) => void;
+  onViewOutput?: (agentId: string) => void;
 }
 
 const columns = [
@@ -42,7 +43,7 @@ function columnToStatus(colKey: string): string {
   return colKey;
 }
 
-export function TaskBoard({ tasks, agents, paused, onTogglePaused, onUpdateStatus, onAssign, onDelete, onBulkDelete, onCancel }: TaskBoardProps) {
+export function TaskBoard({ tasks, agents, paused, onTogglePaused, onUpdateStatus, onAssign, onDelete, onBulkDelete, onCancel, onViewOutput }: TaskBoardProps) {
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
 
   const grouped = tasks.reduce<Record<string, typeof tasks>>((acc, task) => {
@@ -174,6 +175,7 @@ export function TaskBoard({ tasks, agents, paused, onTogglePaused, onUpdateStatu
                       onDelete={onDelete}
                       onCancel={onCancel}
                       onAssign={onAssign}
+                      onViewOutput={onViewOutput}
                     />
                   );
                 })}
