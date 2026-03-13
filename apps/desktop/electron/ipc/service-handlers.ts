@@ -40,11 +40,13 @@ export function registerServiceHandlers(deps: ServiceHandlerDeps): void {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       return { success: false };
     }
+    // Resolve container port → host port (no-op in native mode)
+    const hostPort = serviceRegistry.resolvePortForBrowser(port);
     try {
-      shell.openExternal(`http://localhost:${port}`);
+      shell.openExternal(`http://localhost:${hostPort}`);
       return { success: true };
     } catch (err) {
-      log.warn(`Failed to open http://localhost:${port}: ${String(err)}`);
+      log.warn(`Failed to open http://localhost:${hostPort}: ${String(err)}`);
       return { success: false };
     }
   });

@@ -4,6 +4,7 @@ import { useAppStore } from '@/store';
 interface ServiceEntry {
   agentId: string;
   port: number;
+  hostPort: number;
   name: string;
   logFile?: string;
   startedAt: string;
@@ -150,8 +151,8 @@ export const ServicePanel: React.FC = () => {
                       <span className={`truncate ${isAlive ? 'text-zinc-300' : 'text-zinc-500'}`}>
                         {svc.name}
                       </span>
-                      {svc.port && (
-                        <span className="text-zinc-500 shrink-0">:{svc.port}</span>
+                      {svc.hostPort && (
+                        <span className="text-zinc-500 shrink-0">:{svc.hostPort}</span>
                       )}
                     </div>
                     {agentName && (
@@ -161,11 +162,11 @@ export const ServicePanel: React.FC = () => {
 
                   {/* Action buttons */}
                   <div className="flex items-center gap-0.5 shrink-0">
-                    {isAlive && svc.port && (
+                    {isAlive && svc.hostPort && (
                       <button
-                        onClick={() => handleOpen(svc.port!)}
+                        onClick={() => handleOpen(svc.hostPort)}
                         className="p-0.5 text-zinc-500 hover:text-blue-400 transition-colors"
-                        title={`Open http://localhost:${svc.port}`}
+                        title={`Open http://localhost:${svc.hostPort}`}
                       >
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />

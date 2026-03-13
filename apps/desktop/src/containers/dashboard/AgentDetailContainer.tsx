@@ -11,6 +11,7 @@ interface AgentDetailContainerProps {
 
 interface ServiceEntry {
   port: number;
+  hostPort: number;
   name: string;
   logFile?: string;
   startedAt: string;

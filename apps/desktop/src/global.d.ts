@@ -219,6 +219,7 @@ export interface JamAPI {
     list: () => Promise<Array<{
       agentId: string;
       port: number;
+      hostPort: number;
       name: string;
       logFile?: string;
       startedAt: string;
@@ -229,6 +230,7 @@ export interface JamAPI {
     listForAgent: (agentId: string) => Promise<Array<{
       agentId: string;
       port: number;
+      hostPort: number;
       name: string;
       logFile?: string;
       startedAt: string;
@@ -239,6 +241,7 @@ export interface JamAPI {
     scan: () => Promise<Array<{
       agentId: string;
       port: number;
+      hostPort: number;
       name: string;
       logFile?: string;
       startedAt: string;
@@ -253,6 +256,7 @@ export interface JamAPI {
       callback: (services: Array<{
         agentId: string;
         port: number;
+        hostPort: number;
         name: string;
         logFile?: string;
         startedAt: string;

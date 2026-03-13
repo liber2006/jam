@@ -1,5 +1,6 @@
 interface ServiceEntry {
   port: number;
+  hostPort: number;
   name: string;
   logFile?: string;
   startedAt: string;
@@ -42,8 +43,8 @@ export function AgentServicesList({ services, onStopService, onRestartService, o
                 <span className={`text-sm font-medium truncate ${
                   isAlive ? 'text-white' : 'text-zinc-400'
                 }`}>{svc.name}</span>
-                {svc.port && (
-                  <span className="text-xs text-zinc-500 shrink-0">:{svc.port}</span>
+                {svc.hostPort && (
+                  <span className="text-xs text-zinc-500 shrink-0">:{svc.hostPort}</span>
                 )}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                   isAlive
@@ -55,11 +56,11 @@ export function AgentServicesList({ services, onStopService, onRestartService, o
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {/* Open in browser */}
-                {isAlive && svc.port && (
+                {isAlive && svc.hostPort && (
                   <button
-                    onClick={() => onOpenService(svc.port!)}
+                    onClick={() => onOpenService(svc.hostPort)}
                     className="p-1.5 text-zinc-500 hover:text-blue-400 transition-colors rounded hover:bg-zinc-700"
-                    title={`Open http://localhost:${svc.port}`}
+                    title={`Open http://localhost:${svc.hostPort}`}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -95,7 +96,7 @@ export function AgentServicesList({ services, onStopService, onRestartService, o
               </div>
             </div>
             <div className="flex items-center gap-3 mt-1.5 text-xs text-zinc-500">
-              <span>:{svc.port}</span>
+              <span>:{svc.hostPort}</span>
               {svc.logFile && <span>{svc.logFile}</span>}
               <span>{new Date(svc.startedAt).toLocaleString()}</span>
             </div>

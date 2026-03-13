@@ -21,8 +21,11 @@ const SCAN_SKIP = new Set(['node_modules', '.git', '__pycache__', 'conversations
 
 export interface TrackedService {
   agentId: string;
-  /** Port the service listens on — primary identifier */
+  /** Port the service listens on inside the container (or host in native mode) — primary identifier */
   port: number;
+  /** Port on the host that maps to `port` — use this for browser access.
+   *  In native mode this equals `port`. In Docker mode it's the host-mapped port. */
+  hostPort: number;
   name: string;
   logFile?: string;
   startedAt: string;
@@ -136,6 +139,7 @@ export class ServiceRegistry {
             allEntries.push({
               agentId,
               port: raw.port,
+              hostPort: checkPort,
               name: raw.name,
               logFile: raw.logFile ?? undefined,
               startedAt: raw.startedAt ?? new Date().toISOString(),
@@ -280,7 +284,7 @@ export class ServiceRegistry {
   private servicesEqual(a: TrackedService[], b: TrackedService[]): boolean {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (a[i].port !== b[i].port || a[i].name !== b[i].name || a[i].alive !== b[i].alive) return false;
+      if (a[i].port !== b[i].port || a[i].hostPort !== b[i].hostPort || a[i].name !== b[i].name || a[i].alive !== b[i].alive) return false;
     }
     return true;
   }
