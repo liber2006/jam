@@ -35,7 +35,7 @@ const SYSTEM_SCHEDULES: Array<{
 }> = [
   {
     name: 'Self-Reflection',
-    pattern: { cron: '0 */3 * * *' },
+    pattern: { cron: '0 */6 * * *' },
     taskTemplate: {
       title: 'Self-Reflection',
       description: 'Analyze recent performance, extract learnings, adjust traits and goals.',
@@ -47,7 +47,7 @@ const SYSTEM_SCHEDULES: Array<{
   },
   {
     name: 'Stats Aggregation',
-    pattern: { cron: '0 */6 * * *' },
+    pattern: { cron: '0 */12 * * *' },
     taskTemplate: {
       title: 'Stats Aggregation',
       description: 'Aggregate agent performance stats across the team.',
@@ -185,10 +185,11 @@ export class TaskScheduler {
       }
     }
 
-    // Seed any missing system schedules
-    const existingNames = new Set(systemSchedules.map((s) => s.name));
+    // Seed missing and update drifted system schedules
+    const existingByName = new Map(systemSchedules.map((s) => [s.name, s]));
     for (const def of SYSTEM_SCHEDULES) {
-      if (!existingNames.has(def.name)) {
+      const existing = existingByName.get(def.name);
+      if (!existing) {
         log.info(`Seeding system schedule: "${def.name}"`);
         await this.scheduleStore.create({
           name: def.name,
@@ -200,6 +201,10 @@ export class TaskScheduler {
           lastRun: new Date().toISOString(),
           source: 'system',
         });
+      } else if (JSON.stringify(existing.pattern) !== JSON.stringify(def.pattern)) {
+        // Code-side pattern changed — update the persisted schedule to match
+        log.info(`Updating system schedule pattern: "${def.name}" → ${def.pattern.cron ?? JSON.stringify(def.pattern)}`);
+        await this.scheduleStore.update(existing.id, { pattern: def.pattern });
       }
     }
   }

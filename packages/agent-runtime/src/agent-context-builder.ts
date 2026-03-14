@@ -121,16 +121,23 @@ export class AgentContextBuilder {
       const files = await readdir(dir);
       const jsonlFiles = files.filter(f => f.endsWith('.jsonl')).sort().reverse();
 
-      // Read only enough files to satisfy the request (3x limit buffer)
+      // Read only enough files to satisfy the request (3x limit buffer).
+      // Count only non-hidden entries toward the target — hidden task-trigger
+      // messages can dominate recent files and starve the visible history.
       const readTarget = options.limit * 3;
       const allEntries: ConversationEntry[] = [];
+      let visibleCount = 0;
       for (const file of jsonlFiles) {
         const content = await readFile(join(dir, file), 'utf-8');
         const lines = content.trim().split('\n').filter(Boolean);
         for (const line of lines) {
-          try { allEntries.push(JSON.parse(line)); } catch { /* skip */ }
+          try {
+            const entry: ConversationEntry = JSON.parse(line);
+            allEntries.push(entry);
+            if (!entry.hidden) visibleCount++;
+          } catch { /* skip */ }
         }
-        if (allEntries.length >= readTarget) break;
+        if (visibleCount >= readTarget) break;
       }
 
       // Sort chronologically, with user before agent as tiebreaker for identical timestamps
@@ -145,7 +152,7 @@ export class AgentContextBuilder {
       // Exclude hidden entries (e.g. task trigger prompts) from UI history
       let filtered = allEntries.filter(e => !e.hidden);
       if (options.before) {
-        filtered = allEntries.filter(e => e.timestamp < options.before!);
+        filtered = filtered.filter(e => e.timestamp < options.before!);
       }
 
       // Take the last `limit` entries (most recent ones before cursor)

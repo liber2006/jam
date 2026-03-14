@@ -33,6 +33,7 @@ export interface TerminalSlice {
   flushTerminalData: (agentId: string) => void;
   clearTerminal: (agentId: string) => void;
   appendExecuteOutput: (agentId: string, data: string, clear?: boolean) => void;
+  removeTerminalBuffer: (agentId: string) => void;
   /** Cancel pending batch timers and clear queues. Intended for tests and HMR cleanup. */
   _cleanupBatchers: () => void;
 }
@@ -149,6 +150,15 @@ export const createTerminalSlice: StateCreator<
         executeOutputTimer = setTimeout(flushExecuteOutputBatch, EXECUTE_OUTPUT_BATCH_MS);
       }
     },
+
+    removeTerminalBuffer: (agentId) =>
+      set((state) => {
+        const { [agentId]: _buf, ...terminalBuffers } = state.terminalBuffers;
+        const { [agentId]: _exec, ...executeOutput } = state.executeOutput;
+        terminalBatchQueue.delete(agentId);
+        executeOutputQueue.delete(agentId);
+        return { terminalBuffers, executeOutput };
+      }),
 
     _cleanupBatchers: () => {
       if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }

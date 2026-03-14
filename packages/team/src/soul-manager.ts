@@ -3,6 +3,11 @@ import { join, dirname } from 'node:path';
 import type { SoulStructure, IEventBus } from '@jam/core';
 import { Events } from '@jam/core';
 
+/** Maximum entries retained per soul array — oldest are pruned on evolve() */
+const MAX_LEARNINGS = 50;
+const MAX_GOALS = 20;
+const MAX_TRAITS = 15;
+
 /** Normalize a trait name to a canonical stem for fuzzy matching.
  *  Strips common suffixes (-ness, -ity, -ive, -tion) and normalizes separators. */
 function traitStem(name: string): string {
@@ -219,6 +224,9 @@ export class SoulManager {
     }
     if (reflections.newLearnings) {
       soul.learnings.push(...reflections.newLearnings);
+      if (soul.learnings.length > MAX_LEARNINGS) {
+        soul.learnings = soul.learnings.slice(-MAX_LEARNINGS);
+      }
     }
     if (reflections.traitAdjustments) {
       for (const [trait, delta] of Object.entries(reflections.traitAdjustments)) {
@@ -230,12 +238,21 @@ export class SoulManager {
     }
     if (reflections.newGoals) {
       soul.goals.push(...reflections.newGoals);
+      if (soul.goals.length > MAX_GOALS) {
+        soul.goals = soul.goals.slice(-MAX_GOALS);
+      }
     }
     if (reflections.newStrengths) {
       soul.strengths.push(...reflections.newStrengths);
+      if (soul.strengths.length > MAX_TRAITS) {
+        soul.strengths = soul.strengths.slice(-MAX_TRAITS);
+      }
     }
     if (reflections.newWeaknesses) {
       soul.weaknesses.push(...reflections.newWeaknesses);
+      if (soul.weaknesses.length > MAX_TRAITS) {
+        soul.weaknesses = soul.weaknesses.slice(-MAX_TRAITS);
+      }
     }
 
     soul.version++;

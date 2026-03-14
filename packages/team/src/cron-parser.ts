@@ -12,6 +12,9 @@ interface CronFields {
   dayOfMonth: Set<number>;
   month: Set<number>;
   dayOfWeek: Set<number>;
+  /** True when both DOM and DOW are explicitly specified (not '*').
+   *  Standard cron uses OR logic in this case. */
+  dayOrMode: boolean;
 }
 
 function parseField(field: string, min: number, max: number): Set<number> {
@@ -41,12 +44,18 @@ export function parseCron(expression: string): CronFields {
     throw new Error(`Invalid cron expression: expected 5 fields, got ${parts.length}`);
   }
 
+  // Standard cron: when both DOM (parts[2]) and DOW (parts[4]) are specified
+  // (non-wildcard), use OR logic — fire if either matches.
+  const domRestricted = parts[2] !== '*';
+  const dowRestricted = parts[4] !== '*';
+
   return {
     minute: parseField(parts[0], 0, 59),
     hour: parseField(parts[1], 0, 23),
     dayOfMonth: parseField(parts[2], 1, 31),
     month: parseField(parts[3], 1, 12),
     dayOfWeek: parseField(parts[4], 0, 6),
+    dayOrMode: domRestricted && dowRestricted,
   };
 }
 
@@ -54,13 +63,19 @@ export function parseCron(expression: string): CronFields {
 export function isCronDue(expression: string, date: Date): boolean {
   const fields = parseCron(expression);
 
-  return (
-    fields.minute.has(date.getMinutes()) &&
-    fields.hour.has(date.getHours()) &&
-    fields.dayOfMonth.has(date.getDate()) &&
-    fields.month.has(date.getMonth() + 1) &&
-    fields.dayOfWeek.has(date.getDay())
-  );
+  if (!fields.minute.has(date.getMinutes())) return false;
+  if (!fields.hour.has(date.getHours())) return false;
+  if (!fields.month.has(date.getMonth() + 1)) return false;
+
+  // Standard cron: when both DOM and DOW are restricted, use OR (either matches).
+  // When only one is restricted (the other is '*'), use AND (both must match).
+  const domMatch = fields.dayOfMonth.has(date.getDate());
+  const dowMatch = fields.dayOfWeek.has(date.getDay());
+
+  if (fields.dayOrMode) {
+    return domMatch || dowMatch;
+  }
+  return domMatch && dowMatch;
 }
 
 /** Compute the next time a cron expression will fire after `from` (within `maxDays` days) */
@@ -74,10 +89,13 @@ export function nextCronRun(expression: string, from: Date = new Date(), maxDays
   const limit = from.getTime() + maxDays * 24 * 60 * 60 * 1000;
 
   while (candidate.getTime() <= limit) {
+    const domMatch = fields.dayOfMonth.has(candidate.getDate());
+    const dowMatch = fields.dayOfWeek.has(candidate.getDay());
+    const dayMatch = fields.dayOrMode ? (domMatch || dowMatch) : (domMatch && dowMatch);
+
     if (
       fields.month.has(candidate.getMonth() + 1) &&
-      fields.dayOfMonth.has(candidate.getDate()) &&
-      fields.dayOfWeek.has(candidate.getDay()) &&
+      dayMatch &&
       fields.hour.has(candidate.getHours()) &&
       fields.minute.has(candidate.getMinutes())
     ) {

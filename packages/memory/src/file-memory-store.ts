@@ -4,7 +4,15 @@ import type { AgentId, AgentMemory, SessionEntry, IMemoryStore } from '@jam/core
 
 const VALID_AGENT_ID = /^[a-zA-Z0-9_-]+$/;
 
+/** Session JSONL files older than this are pruned on append */
+const SESSION_RETENTION_DAYS = 180;
+
 export class FileMemoryStore implements IMemoryStore {
+  /** Tracks last prune time per agent to avoid running on every append */
+  private readonly lastPruneTime = new Map<AgentId, number>();
+  /** Minimum interval between prune checks (24 hours) */
+  private static readonly PRUNE_INTERVAL_MS = 24*60 * 60 * 1000;
+
   constructor(private baseDir: string) {}
 
   private validateAgentId(agentId: AgentId): void {
@@ -49,6 +57,35 @@ export class FileMemoryStore implements IMemoryStore {
 
     const { appendFile } = await import('node:fs/promises');
     await appendFile(filePath, line, 'utf-8');
+
+    // Opportunistic pruning — at most once per PRUNE_INTERVAL_MS per agent
+    const now = Date.now();
+    const lastPrune = this.lastPruneTime.get(agentId) ?? 0;
+    if (now - lastPrune > FileMemoryStore.PRUNE_INTERVAL_MS) {
+      this.lastPruneTime.set(agentId, now);
+      this.pruneSessions(dir).catch(() => {});
+    }
+  }
+
+  /** Delete session files older than SESSION_RETENTION_DAYS */
+  private async pruneSessions(dir: string): Promise<void> {
+    const { readdir, unlink } = await import('node:fs/promises');
+    try {
+      const files = await readdir(dir);
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - SESSION_RETENTION_DAYS);
+      const cutoffStr = cutoff.toISOString().split('T')[0];
+
+      for (const file of files) {
+        if (!file.endsWith('.jsonl')) continue;
+        const dateStr = file.replace('.jsonl', '');
+        if (dateStr < cutoffStr) {
+          await unlink(join(dir, file));
+        }
+      }
+    } catch {
+      // Non-critical — pruning will retry next interval
+    }
   }
 
   async getSessionHistory(

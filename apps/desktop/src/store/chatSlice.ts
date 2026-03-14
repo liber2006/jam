@@ -44,6 +44,7 @@ export interface ChatSlice {
   prependMessages: (msgs: ChatMessage[]) => void;
   updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
   deleteMessage: (id: string) => void;
+  removeAgentMessages: (agentId: string) => void;
   clearMessages: () => void;
   setIsProcessing: (v: boolean, agentId?: string | null) => void;
   setThreadAgent: (agentId: string | null) => void;
@@ -161,6 +162,26 @@ export const createChatSlice: StateCreator<
           [msg.agentId]: messageIdsByAgent[msg.agentId].filter((mid) => mid !== id),
         };
       }
+
+      return { messageIds, messagesById, messageIdsByAgent };
+    }),
+
+  removeAgentMessages: (agentId) =>
+    set((state) => {
+      const agentMsgIds = state.messageIdsByAgent[agentId];
+      if (!agentMsgIds || agentMsgIds.length === 0) {
+        if (state.messageIdsByAgent[agentId]) {
+          const { [agentId]: _, ...rest } = state.messageIdsByAgent;
+          return { messageIdsByAgent: rest };
+        }
+        return state;
+      }
+
+      const removeSet = new Set(agentMsgIds);
+      const messageIds = state.messageIds.filter((id) => !removeSet.has(id));
+      const messagesById = { ...state.messagesById };
+      for (const id of agentMsgIds) delete messagesById[id];
+      const { [agentId]: _, ...messageIdsByAgent } = state.messageIdsByAgent;
 
       return { messageIds, messagesById, messageIdsByAgent };
     }),

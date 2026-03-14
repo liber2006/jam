@@ -85,6 +85,8 @@ export function useIPCSubscriptions(enqueueTTS: (data: string) => void): void {
 
     const unsubDeleted = window.jam.agents.onDeleted(({ agentId }) => {
       store().removeAgent(agentId);
+      store().removeAgentMessages(agentId);
+      store().removeTerminalBuffer(agentId);
     });
 
     const unsubUpdated = window.jam.agents.onUpdated(({ agentId, profile }) => {

@@ -8,6 +8,38 @@ export interface TaskHandlerDeps {
   taskExecutor?: TaskExecutor;
 }
 
+/**
+ * Detect whether adding an edge taskId → dependsOnTaskId would create a cycle.
+ * Walks the dependency graph from dependsOnTaskId via BFS. If we reach taskId,
+ * it means dependsOnTaskId (transitively) already depends on taskId.
+ */
+async function detectCycle(
+  taskStore: ITaskStore,
+  taskId: string,
+  dependsOnTaskId: string,
+): Promise<boolean> {
+  const visited = new Set<string>();
+  const queue = [dependsOnTaskId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === taskId) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    const task = await taskStore.get(current);
+    if (task?.dependsOn) {
+      for (const depId of task.dependsOn) {
+        if (!visited.has(depId)) {
+          queue.push(depId);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 export function registerTaskHandlers(deps: TaskHandlerDeps): void {
   const { taskStore, scheduleStore, taskExecutor } = deps;
 
@@ -124,10 +156,19 @@ export function registerTaskHandlers(deps: TaskHandlerDeps): void {
 
   ipcMain.handle('tasks:addDependency', async (_, taskId: string, dependsOnTaskId: string) => {
     try {
+      if (taskId === dependsOnTaskId) {
+        return { success: false, error: 'A task cannot depend on itself' };
+      }
       const task = await taskStore.get(taskId);
       if (!task) return { success: false, error: 'Task not found' };
       const deps = task.dependsOn ?? [];
       if (deps.includes(dependsOnTaskId)) return { success: true, task };
+
+      const wouldCycle = await detectCycle(taskStore, taskId, dependsOnTaskId);
+      if (wouldCycle) {
+        return { success: false, error: 'Adding this dependency would create a cycle' };
+      }
+
       const updated = await taskStore.update(taskId, {
         dependsOn: [...deps, dependsOnTaskId],
       });

@@ -977,6 +977,10 @@ export class Orchestrator {
       termBatcher.add(data.agentId, data.data);
     });
 
+    on<{ agentId: string; exitCode: number }>('pty:exit', (data) => {
+      this.sendToRenderer('terminal:exit', data);
+    });
+
     // Execute output arrives per-chunk with no upstream batching — coalesce at 50ms
     const execBatcher = new Batcher<{ chunks: string[]; clear: boolean }>(
       50,

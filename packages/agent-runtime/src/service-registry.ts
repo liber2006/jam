@@ -115,39 +115,37 @@ export class ServiceRegistry {
     for (const filePath of servicePaths) {
       try {
         const content = await readFile(filePath, 'utf-8');
-        const lines = content.trim().split('\n').filter(Boolean);
-        // Derive cwd for this .services.json (the directory it lives in)
         const serviceCwd = filePath.replace(/[/\\]\.services\.json$/, '');
 
-        for (const line of lines) {
-          try {
-            const raw = JSON.parse(line);
-            // Port is required — services without a port can't be tracked
-            if (!raw.port || !raw.name) continue;
+        // Parse service entries — supports multiple formats:
+        // 1. Full JSON: { "services": [...] }
+        // 2. Single JSON object: { "port": ..., "name": ... }
+        // 3. JSON array: [{ "port": ..., "name": ... }, ...]
+        // 4. JSONL: one JSON object per line
+        const rawEntries = parseServiceEntries(content);
 
-            // Check if port is responding (primary alive indicator)
-            // In sandbox mode, resolve container port → host port for the check
-            const checkPort = this.portResolver(agentId, raw.port);
-            let alive = await isPortAlive(checkPort);
+        for (const raw of rawEntries) {
+          if (!raw.port || !raw.name) continue;
 
-            // During the grace period after restart, trust the service is alive
-            const restartedAt = this.recentRestarts.get(raw.name);
-            if (!alive && restartedAt && Date.now() - restartedAt < RESTART_GRACE_MS) {
-              alive = true;
-            }
+          const checkPort = this.portResolver(agentId, raw.port as number);
+          let alive = await isPortAlive(checkPort);
 
-            allEntries.push({
-              agentId,
-              port: raw.port,
-              hostPort: checkPort,
-              name: raw.name,
-              logFile: raw.logFile ?? undefined,
-              startedAt: raw.startedAt ?? new Date().toISOString(),
-              alive,
-              command: raw.command ?? undefined,
-              cwd: raw.cwd ?? serviceCwd,
-            });
-          } catch { /* skip malformed line */ }
+          const restartedAt = this.recentRestarts.get(raw.name as string);
+          if (!alive && restartedAt && Date.now() - restartedAt < RESTART_GRACE_MS) {
+            alive = true;
+          }
+
+          allEntries.push({
+            agentId,
+            port: raw.port as number,
+            hostPort: checkPort,
+            name: raw.name as string,
+            logFile: (raw.logFile as string) ?? undefined,
+            startedAt: (raw.startedAt as string) ?? new Date().toISOString(),
+            alive,
+            command: (raw.command as string) ?? undefined,
+            cwd: (raw.cwd as string) ?? serviceCwd,
+          });
         }
       } catch (err) {
         log.warn(`Failed to read ${filePath}: ${String(err)}`);
@@ -471,6 +469,32 @@ export class ServiceRegistry {
       if (err) log.warn(`tree-kill failed for "${name}" (PID ${pid}, port ${port}): ${err.message}`);
       else log.info(`Stopped service "${name}" (PID ${pid}, port ${port})`);
     });
+  }
+}
+
+/** Parse .services.json content into an array of service entries.
+ *  Handles: JSON object with `services` array, plain JSON array,
+ *  single JSON object, or JSONL (one JSON object per line). */
+function parseServiceEntries(content: string): Array<Record<string, unknown>> {
+  const trimmed = content.trim();
+  if (!trimmed) return [];
+
+  // Try parsing as a single JSON document first
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed.services)) return parsed.services;
+    if (parsed.port && parsed.name) return [parsed];
+    return [];
+  } catch {
+    // Not valid JSON as a whole — fall back to JSONL (line-by-line)
+    const entries: Array<Record<string, unknown>> = [];
+    for (const line of trimmed.split('\n')) {
+      const l = line.trim();
+      if (!l) continue;
+      try { entries.push(JSON.parse(l)); } catch { /* skip */ }
+    }
+    return entries;
   }
 }
 

@@ -145,6 +145,7 @@ export class AgentManager {
       }
       this.updateStatus(agentId, exitCode === 0 ? 'stopped' : 'error');
       this.updateVisualState(agentId, 'offline');
+      this.eventBus.emit('pty:exit', { agentId, exitCode });
     });
   }
 
@@ -313,6 +314,27 @@ export class AgentManager {
     if (state.status === 'running') {
       this.ptyManager.kill(agentId);
     }
+
+    // Abort running tasks — both queued (keyed by agentId) and detached (keyed by "detached:{agentId}:*")
+    for (const [key, controller] of this.abortControllers) {
+      if (key === agentId || key.startsWith(`detached:${agentId}:`)) {
+        controller.abort();
+        this.abortControllers.delete(key);
+      }
+    }
+
+    // Drain message queue — resolve pending promises so callers aren't left hanging
+    const queue = this.messageQueues.get(agentId);
+    if (queue) {
+      for (const msg of queue) {
+        msg.resolve({ success: false, error: 'Agent deleted' });
+      }
+      this.messageQueues.delete(agentId);
+    }
+
+    // Clean up remaining per-agent state
+    this.processingLocks.delete(agentId);
+    this.voiceSessions.delete(agentId);
 
     this.agents.delete(agentId);
     this.store.deleteProfile(agentId);
