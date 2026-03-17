@@ -76,6 +76,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon-dark.icns",
+      "artifactName": "${productName}.${ext}",
       "target": [
         "dmg",
         "zip"
@@ -103,9 +104,10 @@
         "deb"
       ],
       "category": "Development",
-      "artifactName": "${productName}-${version}.${ext}"
+      "artifactName": "${productName}.${ext}"
     },
     "nsis": {
+      "artifactName": "${productName}-Setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
