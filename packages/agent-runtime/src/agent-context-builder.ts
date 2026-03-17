@@ -110,6 +110,103 @@ export class AgentContextBuilder {
     await mkdir(join(cwd, SKILLS_DIR), { recursive: true });
   }
 
+  /** Write a .gitignore to an agent workspace (idempotent — won't overwrite) */
+  async initializeGitignore(cwd: string): Promise<void> {
+    const gitignorePath = join(cwd, '.gitignore');
+    if (existsSync(gitignorePath)) return;
+
+    const content = [
+      '# Runtime / ephemeral',
+      'conversations/',
+      '*.jsonl',
+      '*.log',
+      '*.pid',
+      '',
+      '# Python environments & packages',
+      '.venv/',
+      '.pylibs/',
+      '.pylib/',
+      '.pip_packages/',
+      '__pycache__/',
+      '*.pyc',
+      '',
+      '# Node',
+      'node_modules/',
+      '',
+      '# Build artifacts',
+      'dist/',
+      '*.pack',
+      '',
+      '# OS files',
+      '.DS_Store',
+      'Thumbs.db',
+      '',
+      '# Databases',
+      '*.db',
+      '*.db-journal',
+      '*.db-wal',
+      '',
+      '# Screenshots / browser artifacts',
+      '.playwright-mcp/screenshots/',
+      '',
+    ].join('\n');
+    await writeFile(gitignorePath, content, 'utf-8');
+  }
+
+  /** Write the root ~/.jam/.gitignore (idempotent — won't overwrite) */
+  async initializeRootGitignore(jamDir: string): Promise<void> {
+    const gitignorePath = join(jamDir, '.gitignore');
+    if (existsSync(gitignorePath)) return;
+
+    const content = [
+      '# Runtime / ephemeral data',
+      'conversations/',
+      '*.jsonl',
+      '*.log',
+      '*.pid',
+      '.alert_state.json',
+      '.alert_monitor.pid',
+      'process-registry.json',
+      '.rescan',
+      'ipc/',
+      '',
+      '# Python environments & packages (anywhere in tree)',
+      '**/.venv/',
+      '**/.pylibs/',
+      '**/.pylib/',
+      '**/.pip_packages/',
+      '**/__pycache__/',
+      '*.pyc',
+      '',
+      '# Node',
+      '**/node_modules/',
+      '',
+      '# Build artifacts',
+      '**/dist/',
+      '*.pack',
+      '',
+      '# Nested git repos (agent clones)',
+      '**/.git/',
+      '',
+      '# OS files',
+      '.DS_Store',
+      'Thumbs.db',
+      '',
+      '# Databases',
+      '*.db',
+      '*.db-journal',
+      '*.db-wal',
+      '',
+      '# Temporary files',
+      '*.tmp',
+      '',
+      '# Screenshots / browser artifacts',
+      '**/.playwright-mcp/screenshots/',
+      '',
+    ].join('\n');
+    await writeFile(gitignorePath, content, 'utf-8');
+  }
+
   /** Load conversation history with pagination (for chat UI).
    *  Returns entries in chronological order, oldest first. */
   async loadPaginatedConversations(

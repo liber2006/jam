@@ -489,13 +489,19 @@ export class Orchestrator {
         const jamBinDir = join(homedir(), '.jam', 'bin');
         const jamIpcDir = join(homedir(), '.jam', 'ipc');
         mkdirSync(jamIpcDir, { recursive: true });
+
+        // System agent mounts entire ~/.jam/ as workspace — skip separate
+        // shared-skills and team mounts (they're already inside the workspace).
+        const isSystemAgent = profile.isSystem === true;
+
         const containerInfo = await cm.createAndStart({
           agentId,
           agentName: profile.name,
           workspacePath: profile.cwd ?? join(homedir(), '.jam', 'agents', profile.name),
-          sharedSkillsPath: sharedSkillsDir,
-          teamDirPath: this.teamDir,
+          sharedSkillsPath: isSystemAgent ? undefined : sharedSkillsDir,
+          teamDirPath: isSystemAgent ? undefined : this.teamDir,
           computerUse: profile.allowComputerUse,
+          // jam CLI bin + IPC socket dir — always mounted (PATH expects /home/agent/.jam/bin)
           credentialMounts: [
             { hostPath: jamBinDir, containerPath: '/home/agent/.jam/bin' },
             { hostPath: jamIpcDir, containerPath: '/home/agent/.jam/ipc' },

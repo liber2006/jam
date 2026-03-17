@@ -13,6 +13,8 @@ const log = createLogger('ContainerManager');
 
 /** Label key for agent ID — matches DockerClient.LABEL_AGENT_ID */
 const LABEL_AGENT_ID = 'com.jam.agent-id';
+/** Label key for config fingerprint — detects stale containers after config changes */
+const LABEL_CONFIG = 'com.jam.config';
 /** Container name prefix — matches DockerClient convention */
 const CONTAINER_PREFIX = 'jam-';
 
@@ -47,20 +49,39 @@ export class ContainerManager implements IContainerManager {
     private readonly config: SandboxConfig,
   ) {}
 
+  /** Build a config fingerprint from container options.
+   *  Used to detect when a reclaimed container's configuration is stale. */
+  private static buildConfigKey(options: CreateContainerOptions): string {
+    return `ws=${options.workspacePath}|cu=${options.computerUse ?? false}`;
+  }
+
   /** Create and start a container for an agent */
   async createAndStart(options: CreateContainerOptions): Promise<ContainerInfo> {
     const { agentId, agentName } = options;
+    const expectedConfig = ContainerManager.buildConfigKey(options);
 
-    // If container already exists, return it
+    // If container already exists, validate its config before reusing
     const existing = this.containers.get(agentId);
     if (existing && existing.status === 'running') {
-      // For desktop containers (reclaimed or reused), verify the computer-use
-      // server is still reachable — it may have crashed or not yet started after
-      // a container reclaim (hot-reload).
-      if (existing.portMappings.has(COMPUTER_USE_CONTAINER_PORT)) {
-        await this.waitForComputerUse(existing.containerId, COMPUTER_USE_CONTAINER_PORT);
+      const actualConfig = this.docker.getLabel(existing.containerId, LABEL_CONFIG);
+
+      // Config mismatch — container is stale (e.g. workspace path changed).
+      // Remove and fall through to recreate with correct mounts.
+      // Missing label (pre-existing container) is treated as valid for backwards compat.
+      if (actualConfig && actualConfig !== expectedConfig) {
+        log.info(`Config changed for "${agentName}" — recreating container (${actualConfig} → ${expectedConfig})`);
+        this.docker.stopContainer(existing.containerId, this.config.stopTimeoutSec);
+        this.docker.removeContainer(existing.containerId);
+        this.portAllocator.release(agentId);
+        this.containers.delete(agentId);
+        // Named volumes preserved — only bind mounts are stale
+      } else {
+        // Existing container is valid — reuse it
+        if (existing.portMappings.has(COMPUTER_USE_CONTAINER_PORT)) {
+          await this.waitForComputerUse(existing.containerId, COMPUTER_USE_CONTAINER_PORT);
+        }
+        return existing;
       }
-      return existing;
     }
 
     const containerName = sanitizeName(agentName);
@@ -190,6 +211,7 @@ export class ContainerManager implements IContainerManager {
         image: this.config.imageName,
         labels: {
           [LABEL_AGENT_ID]: agentId,
+          [LABEL_CONFIG]: expectedConfig,
         },
         cpus: this.config.cpus,
         memoryMb: this.config.memoryMb,

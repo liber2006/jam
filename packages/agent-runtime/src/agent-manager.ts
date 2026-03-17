@@ -172,12 +172,15 @@ export class AgentManager {
       log.warn(`Could not create agent directory "${profile.cwd}": ${String(err)}`, undefined, id);
     }
 
-    // Initialize SOUL.md and skills directory (fire-and-forget)
+    // Initialize SOUL.md, skills directory, and .gitignore (fire-and-forget)
     this.contextBuilder.initializeSoul(profile.cwd, profile).catch(err =>
       log.warn(`Failed to initialize SOUL.md: ${String(err)}`, undefined, id)
     );
     this.contextBuilder.initializeSkillsDir(profile.cwd).catch(err =>
       log.warn(`Failed to initialize skills dir: ${String(err)}`, undefined, id)
+    );
+    this.contextBuilder.initializeGitignore(profile.cwd).catch(err =>
+      log.warn(`Failed to initialize .gitignore: ${String(err)}`, undefined, id)
     );
 
     const state: AgentState = {
@@ -194,14 +197,15 @@ export class AgentManager {
     return { success: true, agentId: id };
   }
 
-  /** Bootstrap a system agent if not already present. Used by Orchestrator at startup. */
+  /** Bootstrap or update a system agent. Used by Orchestrator at startup.
+   *  System agent profiles are code-driven — always synced to canonical values
+   *  so that persisted profiles with stale cwd or other fields get corrected. */
   ensureSystemAgent(profile: AgentProfile): void {
-    if (this.agents.has(profile.id)) return;
-
-    // Default cwd for system agent
+    // Always compute canonical cwd — persisted profiles may have stale paths
     if (!profile.cwd) {
-      const sanitized = profile.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-      profile = { ...profile, cwd: join(homedir(), '.jam', 'agents', sanitized) };
+      profile = profile.isSystem
+        ? { ...profile, cwd: join(homedir(), '.jam') }
+        : { ...profile, cwd: join(homedir(), '.jam', 'agents', profile.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase()) };
     }
     try {
       mkdirSync(profile.cwd!, { recursive: true });
@@ -209,11 +213,31 @@ export class AgentManager {
       log.warn(`Could not create system agent directory: ${String(err)}`, undefined, profile.id);
     }
 
+    // Initialize root .gitignore for system agent, per-agent .gitignore for others
+    if (profile.isSystem) {
+      this.contextBuilder.initializeRootGitignore(profile.cwd!).catch(err =>
+        log.warn(`Failed to initialize root .gitignore: ${String(err)}`, undefined, profile.id)
+      );
+    } else {
+      this.contextBuilder.initializeGitignore(profile.cwd!).catch(err =>
+        log.warn(`Failed to initialize .gitignore: ${String(err)}`, undefined, profile.id)
+      );
+    }
+
+    const existing = this.agents.get(profile.id);
+    if (existing) {
+      // Sync persisted profile to canonical values (e.g. cwd changed in code)
+      existing.profile = profile;
+      this.store.saveProfile(profile);
+      log.info(`Updated system agent "${profile.name}" profile (cwd: ${profile.cwd})`, undefined, profile.id);
+      return;
+    }
+
     const state: AgentState = { profile, status: 'stopped', visualState: 'offline' };
     this.agents.set(profile.id, state);
     this.store.saveProfile(profile);
     this.eventBus.emit('agent:created', { agentId: profile.id, profile });
-    log.info(`Bootstrapped system agent "${profile.name}"`, undefined, profile.id);
+    log.info(`Bootstrapped system agent "${profile.name}" (cwd: ${profile.cwd})`, undefined, profile.id);
   }
 
   async start(

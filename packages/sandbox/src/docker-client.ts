@@ -334,6 +334,21 @@ export class DockerClient implements IDockerClient {
     }
   }
 
+  /** Read a single label value from a container (via docker inspect). */
+  getLabel(containerId: string, label: string): string | undefined {
+    try {
+      const output = execFileSync(
+        this.docker,
+        ['inspect', '--format', `{{index .Config.Labels "${label}"}}`, containerId],
+        { timeout: 5000, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+      );
+      const value = output.trim();
+      return value && value !== '<no value>' ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Inspect actual port mappings from a running container.
    *  Returns a map of containerPort → hostPort parsed from `docker port`. */
   getPortMappings(containerId: string): Map<number, number> {
