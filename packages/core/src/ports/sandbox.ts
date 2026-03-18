@@ -16,6 +16,8 @@ export interface CreateContainerOptions {
   /** Shared team directory — mounted at /team for inter-agent communication */
   teamDirPath?: string;
   credentialMounts?: Array<{ hostPath: string; containerPath: string }>;
+  /** Read-write mounts for IPC signaling (e.g. rescan triggers) */
+  ipcMounts?: Array<{ hostPath: string; containerPath: string }>;
   env?: Record<string, string>;
   /** Enable virtual desktop (Xvfb + computer-use server + noVNC) in this container */
   computerUse?: boolean;

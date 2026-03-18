@@ -54,12 +54,14 @@ export class ContainerManager implements IContainerManager {
    *  Covers all fields that affect bind mounts or entrypoint. */
   private static buildConfigKey(options: CreateContainerOptions): string {
     const cm = (options.credentialMounts ?? []).map(m => m.hostPath).sort().join(',');
+    const ipc = (options.ipcMounts ?? []).map(m => m.hostPath).sort().join(',');
     return [
       `ws=${options.workspacePath}`,
       `cu=${options.computerUse ?? false}`,
       `ss=${options.sharedSkillsPath ?? ''}`,
       `td=${options.teamDirPath ?? ''}`,
       `cm=${cm}`,
+      `ipc=${ipc}`,
     ].join('|');
   }
 
@@ -124,6 +126,13 @@ export class ContainerManager implements IContainerManager {
     if (options.credentialMounts) {
       for (const mount of options.credentialMounts) {
         volumes.push({ hostPath: mount.hostPath, containerPath: mount.containerPath, readOnly: true });
+      }
+    }
+
+    // IPC mounts (read-write — agents need to touch .rescan to signal the orchestrator)
+    if (options.ipcMounts) {
+      for (const mount of options.ipcMounts) {
+        volumes.push({ hostPath: mount.hostPath, containerPath: mount.containerPath });
       }
     }
 

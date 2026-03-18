@@ -503,9 +503,12 @@ export class Orchestrator {
           sharedSkillsPath: isSystemAgent ? undefined : sharedSkillsDir,
           teamDirPath: isSystemAgent ? undefined : this.teamDir,
           computerUse: profile.allowComputerUse,
-          // jam CLI bin + IPC socket dir — always mounted (PATH expects /home/agent/.jam/bin)
+          // jam CLI bin — read-only (PATH expects /home/agent/.jam/bin)
           credentialMounts: [
             { hostPath: jamBinDir, containerPath: '/home/agent/.jam/bin' },
+          ],
+          // IPC dir — read-write so agents can touch .rescan to trigger service discovery
+          ipcMounts: [
             { hostPath: jamIpcDir, containerPath: '/home/agent/.jam/ipc' },
           ],
         });
