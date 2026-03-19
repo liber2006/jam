@@ -1024,12 +1024,11 @@ describe('AgentContextBuilder', () => {
       );
 
       const content = vi.mocked(writeFile).mock.calls[0][1] as string;
-      expect(content).toContain('# Claude');
-      expect(content).toContain('You are Claude.');
-      expect(content).toContain('## Core Directives');
+      expect(content).toContain('## Role');
+      expect(content).toContain('Claude');
+      expect(content).toContain('## Persona');
       expect(content).toContain('Be helpful.');
-      expect(content).toContain('## Personality');
-      expect(content).toContain('## Notes');
+      expect(content).toContain('## Learnings');
     });
 
     it('skips creation if SOUL.md already exists', async () => {
@@ -1042,7 +1041,7 @@ describe('AgentContextBuilder', () => {
       expect(writeFile).not.toHaveBeenCalled();
     });
 
-    it('omits Core Directives section when profile has no systemPrompt', async () => {
+    it('uses default persona when profile has no systemPrompt', async () => {
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(mkdir).mockResolvedValue(undefined);
       vi.mocked(writeFile).mockResolvedValue(undefined);
@@ -1051,9 +1050,8 @@ describe('AgentContextBuilder', () => {
       await builder.initializeSoul('/workspace', profile);
 
       const content = vi.mocked(writeFile).mock.calls[0][1] as string;
-      expect(content).toContain('# TestAgent');
+      expect(content).toContain('## Persona');
       expect(content).toContain('You are TestAgent.');
-      expect(content).not.toContain('## Core Directives');
     });
   });
 

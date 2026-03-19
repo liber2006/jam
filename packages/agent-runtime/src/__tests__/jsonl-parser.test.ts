@@ -98,22 +98,22 @@ describe('parseJsonlStreamEvent', () => {
 });
 
 describe('emitJsonlTerminalLine', () => {
-  it('emits tool_use as inline code block', () => {
+  it('emits tool_use as bold with backtick-quoted input', () => {
     const onOutput = vi.fn();
     emitJsonlTerminalLine(JSON.stringify({ type: 'tool_use', tool_name: 'Bash', input: { command: 'ls' } }), onOutput);
-    expect(onOutput).toHaveBeenCalledWith('\n`Bash` ls\n');
+    expect(onOutput).toHaveBeenCalledWith('\n**Bash** `ls`\n');
   });
 
   it('emits tool_use without input', () => {
     const onOutput = vi.fn();
     emitJsonlTerminalLine(JSON.stringify({ type: 'tool_use', name: 'Search' }), onOutput);
-    expect(onOutput).toHaveBeenCalledWith('\n`Search` \n');
+    expect(onOutput).toHaveBeenCalledWith('\n**Search**\n');
   });
 
   it('emits content_block_start tool_use', () => {
     const onOutput = vi.fn();
     emitJsonlTerminalLine(JSON.stringify({ type: 'content_block_start', content_block: { type: 'tool_use', name: 'Edit' } }), onOutput);
-    expect(onOutput).toHaveBeenCalledWith('\n`Edit` ');
+    expect(onOutput).toHaveBeenCalledWith('\n**Edit** ');
   });
 
   it('emits tool_result as code block', () => {
@@ -188,23 +188,23 @@ describe('emitJsonlTerminalLine', () => {
     expect(onOutput).not.toHaveBeenCalled();
   });
 
-  it('truncates long tool input to 200 chars', () => {
+  it('truncates long tool input to 120 chars', () => {
     const onOutput = vi.fn();
     const longCmd = 'a'.repeat(300);
     emitJsonlTerminalLine(JSON.stringify({ type: 'tool_use', tool_name: 'Bash', input: { command: longCmd } }), onOutput);
     const call = onOutput.mock.calls[0][0] as string;
-    // The command portion should be truncated to 200
-    expect(call).toContain('a'.repeat(200));
-    expect(call).not.toContain('a'.repeat(201));
+    // The command portion should be truncated to 120
+    expect(call).toContain('a'.repeat(120));
+    expect(call).not.toContain('a'.repeat(121));
   });
 
-  it('truncates long tool_result output to 500 chars', () => {
+  it('truncates long tool_result output to 800 chars', () => {
     const onOutput = vi.fn();
-    const longOutput = 'b'.repeat(600);
+    const longOutput = 'b'.repeat(1000);
     emitJsonlTerminalLine(JSON.stringify({ type: 'tool_result', output: longOutput }), onOutput);
     const call = onOutput.mock.calls[0][0] as string;
-    expect(call).toContain('b'.repeat(500));
-    expect(call).not.toContain('b'.repeat(501));
+    expect(call).toContain('b'.repeat(800));
+    expect(call).not.toContain('b'.repeat(801));
   });
 });
 
