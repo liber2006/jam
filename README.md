@@ -58,6 +58,8 @@ Jam is an **autonomous agent orchestration system**. It lets you spin up a team 
 - **Chat + Stage views** — Unified chat or per-agent terminal view
 - **Per-agent voices** — Assign unique TTS voices (61 total across OpenAI + ElevenLabs)
 - **Command routing** — Voice commands routed to the right agent by name
+- **Virtual computer** — Each agent can get its own virtual desktop with browser, mouse, and keyboard
+- **Computer use** — Agents interact with GUIs via screenshot, click, type, scroll, and Playwright browser automation
 - **Sandbox isolation** — Docker containers or OS-level sandboxing (Seatbelt/Bubblewrap)
 - **Git worktree isolation** — Each agent can work on its own branch
 - **Team coordination** — Task scheduling, smart assignment, trust scoring
@@ -81,7 +83,7 @@ The system is a Yarn 4 monorepo with 10 packages:
 | `@jam/team` | Task scheduling, smart assignment, soul evolution, communication |
 | `@jam/sandbox` | Docker containerization, seccomp, port allocation, audit logging |
 | `@jam/os-sandbox` | OS-level sandboxing (Seatbelt/Bubblewrap), git worktree management |
-| `@jam/computer-use` | Virtual desktop (X11), screenshot, browser automation |
+| `@jam/computer-use` | Virtual desktop (Xvfb), screenshot, input simulation, Playwright browser automation, REST API |
 | `@jam/desktop` | Electron + React desktop app |
 
 ### Agent Runtimes
@@ -115,6 +117,44 @@ All runtimes extend `BaseAgentRuntime` using the Template Method pattern:
 | **OS** | Seatbelt (macOS) / Bubblewrap (Linux) | Domain whitelist, file deny lists, deny-write patterns |
 | **Docker** | Container per agent | CPU/memory limits, seccomp, network policy, disk quota, audit log |
 | **Worktree** | Git branch isolation | Auto-create worktrees, merge status tracking |
+
+### Virtual Computer & Computer Use
+
+Each agent can be given its own virtual desktop — a full X11 display running inside a Docker container. When "Allow Computer Use" is enabled on an agent, Jam spins up a complete desktop stack:
+
+```
+┌─────────────────────────────────────────────┐
+│  Docker Container                           │
+│  ┌───────────────────────────────────────┐  │
+│  │  Xvfb (Virtual Display :99)           │  │
+│  │  1920×1080 · 24-bit color             │  │
+│  ├───────────────────────────────────────┤  │
+│  │  Fluxbox (Window Manager)             │  │
+│  ├───────────────────────────────────────┤  │
+│  │  Computer-Use API Server (:3100)      │  │
+│  │  ├── Screenshot (scrot + ImageMagick) │  │
+│  │  ├── Input (xdotool: click/type/key)  │  │
+│  │  ├── Window mgmt (wmctrl)             │  │
+│  │  └── Browser (Playwright + Chromium)  │  │
+│  ├───────────────────────────────────────┤  │
+│  │  x11vnc → noVNC (:6080)              │  │
+│  │  (live view in Jam dashboard)         │  │
+│  └───────────────────────────────────────┘  │
+└─────────────────────────────────────────────┘
+```
+
+**What agents can do with it:**
+
+| Capability | How | Details |
+|------------|-----|---------|
+| **See the screen** | `GET /screenshot` | PNG/JPEG capture, region support, base64 output |
+| **Click & scroll** | `POST /click`, `/scroll` | x/y coordinates, left/right/middle button, double-click |
+| **Type text** | `POST /type`, `/key` | Text input with delay, key combos (Ctrl+C, Alt+Tab, etc.) |
+| **Manage windows** | `GET /windows`, `POST /focus` | List, focus by title/ID, launch apps |
+| **Browse the web** | `POST /browser/launch` | Playwright-driven Chromium with full automation |
+| **Observe changes** | `GET /observe`, `POST /wait` | Composite status, poll for screen changes |
+
+The noVNC viewer is embedded directly in the Jam dashboard, so you can watch your agent interact with GUIs in real time.
 
 ## How It Works
 
