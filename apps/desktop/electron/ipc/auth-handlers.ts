@@ -1,5 +1,5 @@
-import { ipcMain, shell } from 'electron';
-import { spawn, execFileSync } from 'node:child_process';
+import { ipcMain, shell, BrowserWindow } from 'electron';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -15,6 +15,9 @@ export interface AuthHandlerDeps {
   appStore: AppStore;
   getSandboxTier: () => string;
 }
+
+/** Active auth processes awaiting token input */
+const pendingAuthProcesses = new Map<string, ChildProcess>();
 
 /** Per-runtime auth status check. Returns { authenticated, expired? } */
 async function checkRuntimeAuth(runtimeId: string, home: string): Promise<{ authenticated: boolean; expired?: boolean }> {
@@ -66,8 +69,14 @@ export function registerAuthHandlers(deps: AuthHandlerDeps): void {
   /**
    * Run interactive login for any runtime that supports it.
    * Uses the runtime's cliCommand + authCommand (e.g. `claude auth login`).
-   * Captures auth URLs from output and opens them in the system browser.
-   * On macOS with Docker mode, syncs Keychain → file for container access.
+   *
+   * Supports two auth flows:
+   * 1. Browser OAuth — CLI opens browser, user clicks authorize, CLI exits with 0
+   * 2. Token paste — CLI prints a URL + asks to paste a token. Jam detects this,
+   *    sends 'auth:needsToken' event to renderer, and waits for 'auth:submitToken'.
+   *
+   * To prevent double browser tabs, we set BROWSER=echo so the CLI prints the URL
+   * instead of opening it, and Jam opens it via shell.openExternal().
    */
   ipcMain.handle('auth:login', async (_e, runtimeId: string) => {
     const runtime = runtimeRegistry.get(runtimeId);
@@ -84,20 +93,23 @@ export function registerAuthHandlers(deps: AuthHandlerDeps): void {
     log.info(`Starting auth login: ${command} ${args.join(' ')} (runtime: ${runtimeId})`);
 
     const result = await new Promise<{ success: boolean; error?: string }>((resolve) => {
+      // Suppress the CLI's own browser launch — we'll open URLs ourselves to avoid double tabs
       const proc = spawn(command, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env },
+        env: { ...process.env, BROWSER: 'echo' },
       });
+
+      pendingAuthProcesses.set(runtimeId, proc);
 
       let output = '';
       let urlOpened = false;
+      let tokenRequested = false;
 
       const tryOpenUrl = (text: string) => {
         if (urlOpened) return;
         const urls = text.match(/https?:\/\/[^\s"'<>]+/g);
         if (!urls) return;
         for (const url of urls) {
-          // Open any URL that looks like an auth/login redirect
           if (url.includes('oauth') || url.includes('auth') || url.includes('login')
               || url.includes('anthropic') || url.includes('cursor') || url.includes('openai')) {
             shell.openExternal(url);
@@ -108,11 +120,30 @@ export function registerAuthHandlers(deps: AuthHandlerDeps): void {
         }
       };
 
+      const checkForTokenPrompt = (text: string) => {
+        if (tokenRequested) return;
+        // Detect when the CLI asks the user to paste a token
+        const lower = text.toLowerCase();
+        if ((lower.includes('paste') && (lower.includes('token') || lower.includes('code')))
+            || lower.includes('enter the code')
+            || lower.includes('enter the token')
+            || lower.includes('paste it here')
+            || lower.includes('paste the')) {
+          tokenRequested = true;
+          log.info('Auth process is requesting a token paste — notifying renderer');
+          const win = BrowserWindow.getAllWindows()[0];
+          if (win) {
+            win.webContents.send('auth:needsToken', runtimeId);
+          }
+        }
+      };
+
       proc.stdout.on('data', (data: Buffer) => {
         const text = data.toString();
         output += text;
         log.info(`auth stdout: ${text.trim()}`);
         tryOpenUrl(text);
+        checkForTokenPrompt(text);
       });
 
       proc.stderr.on('data', (data: Buffer) => {
@@ -120,20 +151,24 @@ export function registerAuthHandlers(deps: AuthHandlerDeps): void {
         output += text;
         log.info(`auth stderr: ${text.trim()}`);
         tryOpenUrl(text);
+        checkForTokenPrompt(text);
       });
 
       proc.on('close', (code) => {
+        pendingAuthProcesses.delete(runtimeId);
         resolve(code === 0
           ? { success: true }
           : { success: false, error: `Exit code ${code}: ${output.slice(-300)}` });
       });
 
       proc.on('error', (err) => {
+        pendingAuthProcesses.delete(runtimeId);
         resolve({ success: false, error: err.message });
       });
 
       // 5-minute timeout
       const timeout = setTimeout(() => {
+        pendingAuthProcesses.delete(runtimeId);
         try { proc.kill(); } catch { /* ignore */ }
         resolve({ success: false, error: 'Timed out after 5 minutes' });
       }, 5 * 60_000);
@@ -148,6 +183,23 @@ export function registerAuthHandlers(deps: AuthHandlerDeps): void {
       await syncClaudeKeychain();
     }
 
+    return { success: true };
+  });
+
+  /**
+   * Submit a token from the renderer to an active auth process's stdin.
+   * Used when the CLI asks the user to paste a token instead of browser OAuth.
+   */
+  ipcMain.handle('auth:submitToken', async (_e, runtimeId: string, token: string) => {
+    const proc = pendingAuthProcesses.get(runtimeId);
+    if (!proc || proc.killed) {
+      return { success: false, error: 'No active auth process for this runtime' };
+    }
+    if (!proc.stdin || proc.stdin.destroyed) {
+      return { success: false, error: 'Auth process stdin is not available' };
+    }
+    log.info(`Submitting auth token to ${runtimeId} process`);
+    proc.stdin.write(token + '\n');
     return { success: true };
   });
 

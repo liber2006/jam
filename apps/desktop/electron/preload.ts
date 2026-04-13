@@ -461,6 +461,8 @@ export interface JamAPI {
 
   auth: {
     login: (runtimeId: string) => Promise<{ success: boolean; error?: string }>;
+    submitToken: (runtimeId: string, token: string) => Promise<{ success: boolean; error?: string }>;
+    onNeedsToken: (callback: (runtimeId: string) => void) => () => void;
     setApiKey: (runtimeId: string, apiKey: string) => Promise<{ success: boolean; envVar?: string; error?: string }>;
     removeApiKey: (runtimeId: string) => Promise<{ success: boolean }>;
     statusAll: () => Promise<Array<{
@@ -728,6 +730,12 @@ contextBridge.exposeInMainWorld('jam', {
 
   auth: {
     login: (runtimeId: string) => ipcRenderer.invoke('auth:login', runtimeId),
+    submitToken: (runtimeId: string, token: string) => ipcRenderer.invoke('auth:submitToken', runtimeId, token),
+    onNeedsToken: (callback: (runtimeId: string) => void) => {
+      const handler = (_e: unknown, runtimeId: string) => callback(runtimeId);
+      ipcRenderer.on('auth:needsToken', handler);
+      return () => ipcRenderer.removeListener('auth:needsToken', handler);
+    },
     setApiKey: (runtimeId: string, apiKey: string) => ipcRenderer.invoke('auth:setApiKey', runtimeId, apiKey),
     removeApiKey: (runtimeId: string) => ipcRenderer.invoke('auth:removeApiKey', runtimeId),
     statusAll: () => ipcRenderer.invoke('auth:statusAll'),

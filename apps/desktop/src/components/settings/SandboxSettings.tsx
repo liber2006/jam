@@ -73,10 +73,33 @@ const RuntimeAuthRow: React.FC<{
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsToken, setNeedsToken] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
+
+  // Listen for token paste requests from the auth process
+  useEffect(() => {
+    const cleanup = window.jam.auth.onNeedsToken((runtimeId) => {
+      if (runtimeId === rt.runtimeId) {
+        setNeedsToken(true);
+      }
+    });
+    return cleanup;
+  }, [rt.runtimeId]);
+
+  const handleSubmitToken = async () => {
+    if (!tokenInput.trim()) return;
+    const result = await window.jam.auth.submitToken(rt.runtimeId, tokenInput.trim());
+    if (!result.success) {
+      setError(result.error ?? 'Failed to submit token');
+    }
+    setTokenInput('');
+    setNeedsToken(false);
+  };
 
   const handleLogin = async () => {
     setLoginLoading(true);
     setError(null);
+    setNeedsToken(false);
     try {
       const result = await window.jam.auth.login(rt.runtimeId);
       if (!result.success) setError(result.error ?? 'Login failed');
@@ -85,6 +108,7 @@ const RuntimeAuthRow: React.FC<{
       setError(String(err));
     } finally {
       setLoginLoading(false);
+      setNeedsToken(false);
     }
   };
 
@@ -174,6 +198,29 @@ const RuntimeAuthRow: React.FC<{
           >
             Save
           </button>
+        </div>
+      )}
+      {needsToken && loginLoading && (
+        <div className="mt-1.5">
+          <p className="text-[10px] text-yellow-400 mb-1">Paste the authorization code from your browser:</p>
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmitToken()}
+              placeholder="Paste token here"
+              autoFocus
+              className="flex-1 bg-zinc-800 border border-yellow-700/50 rounded px-2 py-1 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-yellow-500"
+            />
+            <button
+              onClick={handleSubmitToken}
+              disabled={!tokenInput.trim()}
+              className="px-2 py-1 text-[10px] rounded bg-yellow-600 text-white hover:bg-yellow-500 disabled:opacity-50 transition-colors"
+            >
+              Submit
+            </button>
+          </div>
         </div>
       )}
       {error && <p className="text-[10px] text-red-400 mt-1">{error}</p>}

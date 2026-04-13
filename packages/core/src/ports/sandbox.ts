@@ -59,6 +59,8 @@ export interface IPortAllocator {
   release(agentId: string): void;
   resolveHostPort(agentId: string, containerPort: number): number | undefined;
   buildPortMappings(agentId: string): Array<{ hostPort: number; containerPort: number }>;
+  /** Register finalized port mappings after special ports (3100, 6080) are assigned */
+  registerMappings(agentId: string, mappings: Array<{ hostPort: number; containerPort: number }>): void;
 }
 
 /** Ensures the Docker image for agent containers exists */
