@@ -169,6 +169,8 @@ export class ContainerManager implements IContainerManager {
       if (this.config.computerUse.noVncEnabled && portMappings.length >= 1) {
         portMappings[portMappings.length - 1].containerPort = NOVNC_CONTAINER_PORT;
       }
+      // Register finalized mappings so resolveHostPort works for special ports
+      this.portAllocator.registerMappings(agentId, portMappings);
     }
 
     const info: ContainerInfo = {

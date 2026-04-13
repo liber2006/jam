@@ -491,6 +491,8 @@ export interface JamAPI {
 
   auth: {
     login: (runtimeId: string) => Promise<{ success: boolean; error?: string }>;
+    submitToken: (runtimeId: string, token: string) => Promise<{ success: boolean; error?: string }>;
+    onNeedsToken: (callback: (runtimeId: string) => void) => () => void;
     setApiKey: (runtimeId: string, apiKey: string) => Promise<{ success: boolean; envVar?: string; error?: string }>;
     removeApiKey: (runtimeId: string) => Promise<{ success: boolean }>;
     statusAll: () => Promise<Array<{

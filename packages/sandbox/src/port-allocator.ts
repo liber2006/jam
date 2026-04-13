@@ -11,6 +11,8 @@ const log = createLogger('PortAllocator');
  */
 export class PortAllocator implements IPortAllocator {
   private allocations = new Map<string, { hostStart: number; containerStart: number; count: number }>();
+  /** Stores actual port mappings (containerPort → hostPort) for special ports like 3100, 6080 */
+  private actualMappings = new Map<string, Map<number, number>>();
 
   constructor(
     private readonly basePort: number = 10_000,
@@ -92,6 +94,7 @@ export class PortAllocator implements IPortAllocator {
     };
 
     this.allocations.set(agentId, allocation);
+    this.actualMappings.set(agentId, new Map(actualMappings));
 
     log.info(
       `Reclaimed ports ${allocation.hostStart}-${allocation.hostStart + allocation.count - 1} ` +
@@ -103,10 +106,20 @@ export class PortAllocator implements IPortAllocator {
   /** Release a port allocation when an agent's container is removed */
   release(agentId: string): void {
     this.allocations.delete(agentId);
+    this.actualMappings.delete(agentId);
   }
 
-  /** Resolve a container port to its mapped host port for a specific agent */
+  /** Resolve a container port to its mapped host port for a specific agent.
+   *  Checks actual port mappings first (handles special ports like 3100, 6080),
+   *  then falls back to arithmetic offset within the allocated range. */
   resolveHostPort(agentId: string, containerPort: number): number | undefined {
+    // Check actual mappings first — covers special ports outside the base range
+    const actual = this.actualMappings.get(agentId);
+    if (actual) {
+      const hostPort = actual.get(containerPort);
+      if (hostPort !== undefined) return hostPort;
+    }
+
     const alloc = this.allocations.get(agentId);
     if (!alloc) return undefined;
 
@@ -116,7 +129,9 @@ export class PortAllocator implements IPortAllocator {
     return alloc.hostStart + offset;
   }
 
-  /** Build Docker -p flag mappings for an agent's allocation */
+  /** Build Docker -p flag mappings for an agent's allocation.
+   *  Note: container-manager may modify containerPort values after this call
+   *  (e.g. for desktop ports 3100/6080). Call registerMappings() after modifications. */
   buildPortMappings(agentId: string): Array<{ hostPort: number; containerPort: number }> {
     const alloc = this.allocate(agentId);
     const mappings: Array<{ hostPort: number; containerPort: number }> = [];
@@ -129,5 +144,15 @@ export class PortAllocator implements IPortAllocator {
     }
 
     return mappings;
+  }
+
+  /** Register actual port mappings after container-manager has finalized them.
+   *  This ensures resolveHostPort works for special ports (3100, 6080). */
+  registerMappings(agentId: string, mappings: Array<{ hostPort: number; containerPort: number }>): void {
+    const map = new Map<number, number>();
+    for (const m of mappings) {
+      map.set(m.containerPort, m.hostPort);
+    }
+    this.actualMappings.set(agentId, map);
   }
 }

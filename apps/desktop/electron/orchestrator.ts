@@ -853,6 +853,10 @@ export class Orchestrator {
         ? buildComputerUseSkill('host')
         : buildComputerUseSkill('container');
       await writeFile(computerUseSkillPath, skillContent, 'utf-8');
+    } else {
+      // Remove stale skill if computer-use was disabled
+      const staleComputerUsePath = join(dir, 'computer-use.md');
+      await unlink(staleComputerUsePath).catch(() => {});
     }
   }
 
@@ -2204,19 +2208,21 @@ function buildComputerUseSkill(mode: 'container' | 'host'): string {
 
   const envPreamble = isContainer
     ? [
-        'IMPORTANT: You are running inside an isolated Docker container (Ubuntu Linux).',
+        'IMPORTANT: You have a VIRTUAL COMPUTER — a full Linux desktop running inside your container.',
         'Your Bash tool executes commands INSIDE the container — not on the host machine.',
-        'You have your own virtual Linux desktop with a display server, window manager, and browser.',
-        'For ALL browser, GUI, desktop, screenshot, and visual tasks, use the HTTP API below.',
+        'You have your own virtual display (DISPLAY=:99), window manager, and Chromium browser.',
+        `The computer-use API is at ${baseUrl} — this is YOUR internal service, not restricted by any port range.`,
+        'You MUST use this API for ALL browser, GUI, desktop, screenshot, and visual tasks.',
         'Do NOT use MCP Playwright tools, host bridge openExternal, or any host-side browser.',
-        `Those operate on the HOST machine — your desktop is at ${baseUrl} inside your sandbox.`,
+        'When asked to open a browser, search the web, visit a URL, or do anything visual — use this API.',
       ].join('\n')
     : [
-        'You have access to a virtual Linux desktop running in a Docker container.',
+        'IMPORTANT: You have a VIRTUAL COMPUTER — a full Linux desktop running in a Docker container.',
         'Your Bash tool executes on the HOST machine — the desktop runs in a container.',
         'The computer-use API is available at the URL in $JAM_COMPUTER_USE_URL.',
-        'For ALL browser, GUI, desktop, screenshot, and visual tasks, use the HTTP API below.',
+        'You MUST use this API for ALL browser, GUI, desktop, screenshot, and visual tasks.',
         'Do NOT use MCP Playwright tools or host browser — use the virtual desktop API.',
+        'When asked to open a browser, search the web, visit a URL, or do anything visual — use this API.',
       ].join('\n');
 
   return [

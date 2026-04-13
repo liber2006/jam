@@ -388,6 +388,18 @@ export class AgentContextBuilder {
           envLines.push(`  - ${m.containerPath}: ${m.description}${m.readOnly ? ' (read-only)' : ''}`);
         }
       }
+      if (profile.allowComputerUse) {
+        envLines.push(
+          '',
+          'IMPORTANT: You have a VIRTUAL COMPUTER (virtual desktop) available.',
+          'Your display is at DISPLAY=:99 with a full X11 desktop, window manager, and browser.',
+          'The computer-use API is running at 127.0.0.1:3100 INSIDE your container.',
+          'Port 3100 is YOUR internal service port — it is NOT restricted by any port range.',
+          'You MUST use this virtual desktop for ALL browser, GUI, and visual tasks.',
+          'Use curl to interact with it (screenshots, clicks, typing, browser automation).',
+          'See the computer-use skill below for the full API reference.',
+        );
+      }
       if (this.executionEnv.hostBridgeUrl) {
         envLines.push(
           'Host bridge available — you can call host operations (open URLs, clipboard, notifications) via:',
@@ -417,8 +429,16 @@ export class AgentContextBuilder {
           `To run commands inside the container: docker exec ${this.executionEnv.containerName} <command>`,
         );
       }
-      if (this.executionEnv.containerServiceUrls?.computerUse) {
-        envLines.push(`Virtual desktop API: ${this.executionEnv.containerServiceUrls.computerUse}`);
+      if (profile.allowComputerUse && this.executionEnv.containerServiceUrls?.computerUse) {
+        envLines.push(
+          '',
+          'IMPORTANT: You have a VIRTUAL COMPUTER (virtual desktop) available.',
+          `Virtual desktop API: ${this.executionEnv.containerServiceUrls.computerUse}`,
+          'You MUST use this virtual desktop for ALL browser, GUI, and visual tasks.',
+          'The computer-use API runs on port 3100 inside your container — this is YOUR port, not restricted.',
+          'Use curl to interact with it (screenshots, clicks, typing, browser automation).',
+          'See the computer-use skill below for the full API reference.',
+        );
       }
       envLines.push('--- END EXECUTION ENVIRONMENT ---');
       sections.push(envLines.join('\n'));
