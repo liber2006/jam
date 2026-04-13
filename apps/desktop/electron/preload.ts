@@ -272,7 +272,7 @@ export interface JamAPI {
   };
 
   chat: {
-    sendCommand: (text: string, attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>) => Promise<{
+    sendCommand: (text: string, attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>, selectedAgentId?: string | null) => Promise<{
       success: boolean;
       text?: string;
       error?: string;
@@ -497,7 +497,6 @@ contextBridge.exposeInMainWorld('jam', {
   runtimes: {
     listMetadata: () => ipcRenderer.invoke('runtimes:listMetadata'),
   },
-
   agents: {
     create: (profile) => ipcRenderer.invoke('agents:create', profile),
     update: (agentId, updates) =>
@@ -652,7 +651,7 @@ contextBridge.exposeInMainWorld('jam', {
   },
 
   chat: {
-    sendCommand: (text, attachments) => ipcRenderer.invoke('chat:sendCommand', text, attachments),
+    sendCommand: (text, attachments, selectedAgentId) => ipcRenderer.invoke('chat:sendCommand', text, attachments, selectedAgentId),
     interruptAgent: (agentId) => ipcRenderer.invoke('chat:interruptAgent', agentId),
     loadHistory: (options) => ipcRenderer.invoke('chat:loadHistory', options),
     onAgentAcknowledged: (cb) => createEventListener('chat:agentAcknowledged', cb),

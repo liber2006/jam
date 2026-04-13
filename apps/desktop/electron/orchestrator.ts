@@ -1176,6 +1176,11 @@ export class Orchestrator {
     on('code:improved', (data) => { this.sendToRenderer('code:improved', data); });
     on('code:failed', (data) => { this.sendToRenderer('code:failed', data); });
     on('code:rolledback', (data) => { this.sendToRenderer('code:rolledback', data); });
+
+    // Sync agent names to the command parser for agents restored from persistence.
+    // Restored agents don't emit 'agent:created', so the parser would be empty
+    // until the first agent:created/updated event without this initial sync.
+    this.syncAgentNames();
   }
 
   initVoice(): void {

@@ -61,7 +61,7 @@ export class CommandRouter {
   }
 
   /** Resolve the target agent for a parsed command, using source-specific fallback chain */
-  resolveTarget(parsed: ParsedCommand, source: 'voice' | 'text'): string | undefined {
+  resolveTarget(parsed: ParsedCommand, source: 'voice' | 'text', selectedAgentId?: string): string | undefined {
     let targetId: string | undefined;
 
     // 1. Explicit agent name from command
@@ -75,7 +75,16 @@ export class CommandRouter {
       }
     }
 
-    // 2. Fallback: last target for this source, then the other source
+    // 2. Fallback: UI-selected agent (only if it's running)
+    if (!targetId && selectedAgentId) {
+      const agent = this.agentManager.get(selectedAgentId);
+      if (agent && agent.status === 'running') {
+        targetId = selectedAgentId;
+        log.debug(`Routing to UI-selected agent: ${targetId}`);
+      }
+    }
+
+    // 3. Fallback: last target for this source, then the other source
     if (!targetId) {
       const lastSame = this.lastTargetIds.get(source);
       const lastOther = this.lastTargetIds.get(source === 'voice' ? 'text' : 'voice');
@@ -96,7 +105,7 @@ export class CommandRouter {
       }
     }
 
-    // 3. Fallback: only running agent (including system agent)
+    // 4. Fallback: only running agent (including system agent)
     if (!targetId) {
       const running = this.agentManager.list()
         .filter((a) => a.status === 'running');

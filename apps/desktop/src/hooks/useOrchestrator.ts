@@ -82,7 +82,8 @@ export function useOrchestrator() {
 
     try {
       const files = attachments?.map((a) => ({ name: a.name, dataUrl: a.dataUrl, mimeType: a.mimeType }));
-      const result = await window.jam.chat.sendCommand(text, files);
+      const { selectedAgentId } = useAppStore.getState();
+      const result = await window.jam.chat.sendCommand(text, files, selectedAgentId);
 
       // Add full agent response (ack message was already shown via event)
       if (result.success) {

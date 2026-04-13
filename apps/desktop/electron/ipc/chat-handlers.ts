@@ -19,7 +19,7 @@ export function registerChatHandlers(
 ): void {
   const { commandParser, agentManager } = deps;
 
-  ipcMain.handle('chat:sendCommand', async (_, text: string, _attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>) => {
+  ipcMain.handle('chat:sendCommand', async (_, text: string, _attachments?: Array<{ name: string; dataUrl: string; mimeType: string }>, selectedAgentId?: string | null) => {
     // Handle /status command
     const statusMatch = text.match(/^\/status\s*(.*)/i);
     if (statusMatch) {
@@ -45,7 +45,7 @@ export function registerChatHandlers(
       return { success: false, error: 'Meta commands not yet supported via text' };
     }
 
-    const targetId = router.resolveTarget(parsed, 'text');
+    const targetId = router.resolveTarget(parsed, 'text', selectedAgentId ?? undefined);
 
     if (!targetId) {
       if (parsed.targetAgentName) {
